@@ -8,8 +8,10 @@ function check_prerequisites(terminal::TerminalOptions)
     required_binaries = ["ssh", "sshpass", terminal.emulator]
     missing_binaries = filter(bin -> Sys.which(bin) === nothing, required_binaries)
     if !isempty(missing_binaries)
-        throw(ErrorException("Missing required system binaries in PATH: $(join(missing_binaries, ", ")). " *
-                             "Please ensure they are installed (e.g. 'sudo dnf install sshpass')."))
+        throw(ErrorException(
+            "Missing required system binaries in PATH: $(join(missing_binaries, ", ")). " *
+            "Please ensure they are installed (e.g. 'sudo dnf install sshpass')."
+        ))
     end
     return nothing
 end
@@ -20,8 +22,7 @@ end
 Determine the effective host key verification policy for a given target, respecting overrides.
 """
 function resolve_host_key_policy(target::SshTarget, globals::GlobalConfig)::String
-    return target.strict_host_key_checking !== nothing ? target.strict_host_key_checking :
-           globals.strict_host_key_checking
+    return target.strict_host_key_checking !== nothing ? target.strict_host_key_checking : globals.strict_host_key_checking
 end
 
 """
@@ -38,6 +39,20 @@ function get_runtime_directory()::String
 end
 
 """
+    clean_runtime_directory!(dir_path::AbstractString = get_runtime_directory())
+
+Purge all transient wrapper scripts and tab configuration files from the runtime directory.
+"""
+function clean_runtime_directory!(dir_path::AbstractString = get_runtime_directory())
+    if isdir(dir_path)
+        for item in readdir(dir_path; join = true)
+            rm(item; recursive = true, force = true)
+        end
+    end
+    return nothing
+end
+
+"""
     build_single_window_command(
         target::SshTarget,
         globals::GlobalConfig,
@@ -46,31 +61,35 @@ end
 
 Construct a command to spawn an independent single Konsole window.
 """
-function build_single_window_command(target::SshTarget,
-                                     globals::GlobalConfig,
-                                     terminal::TerminalOptions)::Cmd
+function build_single_window_command(
+    target::SshTarget,
+    globals::GlobalConfig,
+    terminal::TerminalOptions,
+)::Cmd
     policy = resolve_host_key_policy(target, globals)
-
+    
     cmd_args = String[terminal.emulator, "--separate"]
     if terminal.hold
         push!(cmd_args, "--hold")
     end
 
     push!(cmd_args, "-p", "tabtitle=$(target.title)")
-    push!(cmd_args,
-          "-e",
-          "sshpass",
-          "-e",
-          "ssh",
-          "-p",
-          string(target.port),
-          "-o",
-          "StrictHostKeyChecking=$(policy)",
-          "-o",
-          "ConnectTimeout=$(globals.connect_timeout)",
-          "-o",
-          "LogLevel=$(globals.log_level)",
-          "$(target.user)@$(target.host)")
+    push!(
+        cmd_args,
+        "-e",
+        "sshpass",
+        "-e",
+        "ssh",
+        "-p",
+        string(target.port),
+        "-o",
+        "StrictHostKeyChecking=$(policy)",
+        "-o",
+        "ConnectTimeout=$(globals.connect_timeout)",
+        "-o",
+        "LogLevel=$(globals.log_level)",
+        "$(target.user)@$(target.host)",
+    )
 
     target_env = merge(copy(ENV), Dict("SSHPASS" => target.password))
     base_cmd = Cmd(cmd_args)
@@ -83,15 +102,19 @@ end
         globals::GlobalConfig,
     )::String
 
-Generate the content of a secure shell wrapper script for a given target.
+Generate the content of a self-destructing shell wrapper script for a given target.
+The script immediately deletes itself from the filesystem (`rm -f -- \"\$0\"`) upon invocation.
 """
-function generate_target_wrapper_script(target::SshTarget,
-                                        globals::GlobalConfig)::String
+function generate_target_wrapper_script(
+    target::SshTarget,
+    globals::GlobalConfig,
+)::String
     policy = resolve_host_key_policy(target, globals)
     escaped_password = replace(target.password, '\'' => "'\\''")
-
+    
     return """
     #!/bin/bash
+    rm -f -- "\$0"
     export SSHPASS='$(escaped_password)'
     exec sshpass -e ssh -p $(target.port) -o StrictHostKeyChecking=$(policy) -o ConnectTimeout=$(globals.connect_timeout) -o LogLevel=$(globals.log_level) $(target.user)@$(target.host)
     """
@@ -105,8 +128,10 @@ end
 
 Generate the content of a Konsole tabs definition file referencing executable wrapper scripts.
 """
-function generate_tabs_file_content(targets::AbstractVector{SshTarget},
-                                    wrapper_paths::AbstractVector{<:AbstractString})::String
+function generate_tabs_file_content(
+    targets::AbstractVector{SshTarget},
+    wrapper_paths::AbstractVector{<:AbstractString},
+)::String
     lines = String[]
     for (target, wrapper_path) in zip(targets, wrapper_paths)
         push!(lines, "title: $(target.title) ;; command: $(wrapper_path)")
@@ -122,10 +147,11 @@ end
 
 Construct the Konsole invocation command to launch all tabs in a single window via `--tabs-from-file`.
 """
-function build_tabs_launch_command(config::SessionConfig,
-                                   tabs_file_path::AbstractString)::Cmd
-    cmd_args = String[config.terminal.emulator, "--nofork", "--tabs-from-file",
-                      tabs_file_path]
+function build_tabs_launch_command(
+    config::SessionConfig,
+    tabs_file_path::AbstractString,
+)::Cmd
+    cmd_args = String[config.terminal.emulator, "--nofork", "--tabs-from-file", tabs_file_path]
     if config.terminal.hold
         push!(cmd_args, "--hold")
     end
@@ -141,8 +167,10 @@ end
 Spawn terminal sessions for all targets. In `:tabs` mode, creates all tabs within a single Konsole window.
 In `:windows` mode, spawns individual windows for each target.
 """
-function launch_all_sessions(config::SessionConfig;
-                             dry_run::Bool=false)::Vector{Union{Cmd, Base.Process}}
+function launch_all_sessions(
+    config::SessionConfig;
+    dry_run::Bool = false,
+)::Vector{Union{Cmd, Base.Process}}
     if !dry_run
         check_prerequisites(config.terminal)
     end
@@ -155,12 +183,13 @@ function launch_all_sessions(config::SessionConfig;
         end
 
         session_dir = get_runtime_directory()
+        clean_runtime_directory!(session_dir)
 
         wrapper_paths = String[]
         for (idx, target) in enumerate(config.targets)
             wrapper_file = joinpath(session_dir, "target_$(idx).sh")
             open(wrapper_file, "w") do io
-                return write(io, generate_target_wrapper_script(target, config.globals))
+                write(io, generate_target_wrapper_script(target, config.globals))
             end
             chmod(wrapper_file, 0o700)
             push!(wrapper_paths, wrapper_file)
@@ -168,13 +197,18 @@ function launch_all_sessions(config::SessionConfig;
 
         tabs_path = joinpath(session_dir, "tabs.konsole")
         open(tabs_path, "w") do io
-            return write(io, generate_tabs_file_content(config.targets, wrapper_paths))
+            write(io, generate_tabs_file_content(config.targets, wrapper_paths))
         end
         chmod(tabs_path, 0o600)
 
         cmd = build_tabs_launch_command(config, tabs_path)
         @info "Launching single Konsole window with tabs" total_tabs=length(config.targets) tabs_file=tabs_path
-        proc = run(cmd; wait=false)
+        proc = run(cmd; wait = false)
+
+        # Synchronously wait brief interval for Konsole to finish reading tabs, then purge runtime files
+        sleep(0.6)
+        clean_runtime_directory!(session_dir)
+
         return Union{Cmd, Base.Process}[proc]
     else
         processes = Union{Cmd, Base.Process}[]
@@ -184,7 +218,7 @@ function launch_all_sessions(config::SessionConfig;
             if dry_run
                 push!(processes, cmd)
             else
-                push!(processes, run(cmd; wait=false))
+                push!(processes, run(cmd; wait = false))
             end
         end
         return processes

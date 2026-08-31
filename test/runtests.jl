@@ -3,7 +3,7 @@ using SshAutoLogin
 using Aqua
 using JET
 using ExplicitImports
-using TOML: TOML
+import TOML
 
 @testset "SshAutoLogin.jl" begin
     @testset "Static Code Quality Analysis (QA)" begin
@@ -12,7 +12,7 @@ using TOML: TOML
         end
 
         @testset "JET.jl Static Analysis" begin
-            JET.test_package(SshAutoLogin; target_modules=[SshAutoLogin])
+            JET.test_package(SshAutoLogin; target_modules = [SshAutoLogin])
         end
 
         @testset "ExplicitImports.jl" begin
@@ -43,12 +43,14 @@ using TOML: TOML
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "", "secret")
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin user", "secret")
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin", "")
-        @test_throws ArgumentError SshTarget("192.168.1.10",
-                                             22,
-                                             "admin",
-                                             "secret",
-                                             "title",
-                                             "invalid_policy")
+        @test_throws ArgumentError SshTarget(
+            "192.168.1.10",
+            22,
+            "admin",
+            "secret",
+            "title",
+            "invalid_policy",
+        )
 
         # Global validation failures
         @test_throws ArgumentError GlobalConfig(0, "accept-new", "ERROR")
@@ -121,33 +123,42 @@ using TOML: TOML
         # Empty target list
         @test_throws ArgumentError parse_config(Dict{String, Any}("targets" => Any[]))
         # Missing required key in target
-        @test_throws ArgumentError parse_config(Dict{String, Any}("targets" =>
-                                                                      [Dict("host" => "192.168.1.1",
-                                                                            "port" => 22,
-                                                                            "user" => "root")]))
+        @test_throws ArgumentError parse_config(
+            Dict{String, Any}(
+                "targets" => [Dict("host" => "192.168.1.1", "port" => 22, "user" => "root")],
+            ),
+        )
     end
 
-    @testset "Runtime Directory & Tab Script Generation" begin
+    @testset "Runtime Directory & Self-Destructing Tab Scripts" begin
         globals = GlobalConfig(10, "accept-new", "ERROR")
         term_tabs = TerminalOptions("konsole", :tabs, false)
         term_windows = TerminalOptions("konsole", :windows, true)
 
         target1 = SshTarget("192.168.1.10", 22, "admin", "p@ssword1", "Primary Node")
-        target2 = SshTarget("192.168.1.20", 2222, "guest", "p'ssword2", "Secondary Node",
-                            "no")
+        target2 = SshTarget("192.168.1.20", 2222, "guest", "p'ssword2", "Secondary Node", "no")
 
         # Runtime directory
         r_dir = get_runtime_directory()
         @test isdir(r_dir)
 
-        # Wrapper script generation
+        # Clean runtime directory
+        test_dummy = joinpath(r_dir, "dummy.txt")
+        write(test_dummy, "test")
+        @test isfile(test_dummy)
+        clean_runtime_directory!(r_dir)
+        @test !isfile(test_dummy)
+
+        # Wrapper script generation with self-destruction
         script1 = generate_target_wrapper_script(target1, globals)
+        @test occursin("rm -f -- \"\$0\"", script1)
         @test occursin("export SSHPASS='p@ssword1'", script1)
         @test occursin("StrictHostKeyChecking=accept-new", script1)
         @test occursin("admin@192.168.1.10", script1)
 
         # Quotes escaping in password
         script2 = generate_target_wrapper_script(target2, globals)
+        @test occursin("rm -f -- \"\$0\"", script2)
         @test occursin("export SSHPASS='p'\\''ssword2'", script2)
         @test occursin("StrictHostKeyChecking=no", script2)
         @test occursin("guest@192.168.1.20", script2)
@@ -176,14 +187,14 @@ using TOML: TOML
         @test any(startswith(e, "SSHPASS=") for e in win_cmd.env)
 
         # Launch all sessions in dry-run mode for tabs
-        dry_run_tabs = launch_all_sessions(config_tabs; dry_run=true)
+        dry_run_tabs = launch_all_sessions(config_tabs; dry_run = true)
         @test length(dry_run_tabs) == 1
         @test dry_run_tabs[1].exec ==
               ["konsole", "--nofork", "--tabs-from-file", "<generated-tabs-file>"]
 
         # Launch all sessions in dry-run mode for windows
         config_windows = SessionConfig(globals, term_windows, [target1, target2])
-        dry_run_wins = launch_all_sessions(config_windows; dry_run=true)
+        dry_run_wins = launch_all_sessions(config_windows; dry_run = true)
         @test length(dry_run_wins) == 2
         @test dry_run_wins[1] isa Cmd
         @test dry_run_wins[2] isa Cmd
