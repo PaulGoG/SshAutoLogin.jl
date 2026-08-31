@@ -43,7 +43,11 @@ using TOML: TOML
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "", "secret")
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin user", "secret")
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin", "")
-        @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin", "secret", "title",
+        @test_throws ArgumentError SshTarget("192.168.1.10",
+                                             22,
+                                             "admin",
+                                             "secret",
+                                             "title",
                                              "invalid_policy")
 
         # Global validation failures
@@ -123,47 +127,55 @@ using TOML: TOML
                                                                             "user" => "root")]))
     end
 
-    @testset "Command Construction & Dry Run Dispatch" begin
+    @testset "Tab File Generation & Command Construction" begin
         globals = GlobalConfig(10, "accept-new", "ERROR")
         term_tabs = TerminalOptions("konsole", :tabs, false)
-        term_hold = TerminalOptions("konsole", :windows, true)
+        term_windows = TerminalOptions("konsole", :windows, true)
 
         target1 = SshTarget("192.168.1.10", 22, "admin", "p@ssword1", "Primary Node")
-        target2 = SshTarget("192.168.1.20", 2222, "guest", "p@ssword2", "Secondary Node",
+        target2 = SshTarget("192.168.1.20", 2222, "guest", "p'ssword2", "Secondary Node",
                             "no")
 
-        # First tab command
-        cmd1 = build_terminal_command(target1, globals, term_tabs; is_first=true)
-        cmd1_args = cmd1.exec
-        @test cmd1_args[1] == "konsole"
-        @test !("--new-tab" in cmd1_args)
-        @test "-p" in cmd1_args
-        @test "tabtitle=Primary Node" in cmd1_args
-        @test "-e" in cmd1_args
-        @test "sshpass" in cmd1_args
-        @test "StrictHostKeyChecking=accept-new" in cmd1_args
-        @test "admin@192.168.1.10" in cmd1_args
-        @test cmd1.env !== nothing
-        @test any(startswith(e, "SSHPASS=") for e in cmd1.env)
+        # Tabs file generation
+        tabs_str = generate_tabs_file_content([target1, target2], globals)
+        @test occursin("title: Primary Node ;; command: env SSHPASS='p@ssword1'", tabs_str)
+        @test occursin("StrictHostKeyChecking=accept-new", tabs_str)
+        @test occursin("admin@192.168.1.10", tabs_str)
 
-        # Subsequent tab command (should include --new-tab)
-        cmd2 = build_terminal_command(target2, globals, term_tabs; is_first=false)
-        cmd2_args = cmd2.exec
-        @test cmd2_args[1] == "konsole"
-        @test "--new-tab" in cmd2_args
-        @test "StrictHostKeyChecking=no" in cmd2_args
-        @test "guest@192.168.1.20" in cmd2_args
+        # Password with quotes escaping
+        @test occursin("title: Secondary Node ;; command: env SSHPASS='p'\\''ssword2'",
+                       tabs_str)
+        @test occursin("StrictHostKeyChecking=no", tabs_str)
+        @test occursin("guest@192.168.1.20", tabs_str)
 
-        # Windows mode with hold enabled
-        cmd_hold = build_terminal_command(target1, globals, term_hold; is_first=false)
-        @test !("--new-tab" in cmd_hold.exec)
-        @test "--hold" in cmd_hold.exec
+        # Tabs launch command
+        config_tabs = SessionConfig(globals, term_tabs, [target1, target2])
+        tab_cmd = build_tabs_launch_command(config_tabs, "/tmp/tabs.txt")
+        @test tab_cmd.exec == ["konsole", "--tabs-from-file", "/tmp/tabs.txt"]
 
-        # Launch all sessions in dry-run mode
-        config = SessionConfig(globals, term_tabs, [target1, target2])
-        dry_run_cmds = launch_all_sessions(config; dry_run=true)
-        @test length(dry_run_cmds) == 2
-        @test dry_run_cmds[1] isa Cmd
-        @test dry_run_cmds[2] isa Cmd
+        # Windows mode command
+        win_cmd = build_single_window_command(target1, globals, term_windows)
+        @test win_cmd.exec[1] == "konsole"
+        @test "--separate" in win_cmd.exec
+        @test "--hold" in win_cmd.exec
+        @test "-p" in win_cmd.exec
+        @test "tabtitle=Primary Node" in win_cmd.exec
+        @test "-e" in win_cmd.exec
+        @test "sshpass" in win_cmd.exec
+        @test win_cmd.env !== nothing
+        @test any(startswith(e, "SSHPASS=") for e in win_cmd.env)
+
+        # Launch all sessions in dry-run mode for tabs
+        dry_run_tabs = launch_all_sessions(config_tabs; dry_run=true)
+        @test length(dry_run_tabs) == 1
+        @test dry_run_tabs[1].exec ==
+              ["konsole", "--tabs-from-file", "<generated-tabs-file>"]
+
+        # Launch all sessions in dry-run mode for windows
+        config_windows = SessionConfig(globals, term_windows, [target1, target2])
+        dry_run_wins = launch_all_sessions(config_windows; dry_run=true)
+        @test length(dry_run_wins) == 2
+        @test dry_run_wins[1] isa Cmd
+        @test dry_run_wins[2] isa Cmd
     end
 end

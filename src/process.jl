@@ -25,45 +25,25 @@ function resolve_host_key_policy(target::SshTarget, globals::GlobalConfig)::Stri
 end
 
 """
-    build_terminal_command(
+    build_single_window_command(
         target::SshTarget,
         globals::GlobalConfig,
-        terminal::TerminalOptions;
-        is_first::Bool = false,
+        terminal::TerminalOptions,
     )::Cmd
 
-Construct the full terminal execution `Cmd` with `SSHPASS` credential injection.
-
-# Arguments
-- `target::SshTarget`: Target host parameters.
-- `globals::GlobalConfig`: Global connection options.
-- `terminal::TerminalOptions`: Terminal manager settings.
-- `is_first::Bool`: Whether this invocation is the first tab in the session batch.
-
-# Returns
-- `Cmd`: Configured command object with injected environment variable.
+Construct a command to spawn an independent single Konsole window.
 """
-function build_terminal_command(target::SshTarget,
-                                globals::GlobalConfig,
-                                terminal::TerminalOptions;
-                                is_first::Bool=false)::Cmd
+function build_single_window_command(target::SshTarget,
+                                     globals::GlobalConfig,
+                                     terminal::TerminalOptions)::Cmd
     policy = resolve_host_key_policy(target, globals)
 
-    # Construct base Konsole arguments
-    cmd_args = String[terminal.emulator]
-
-    if terminal.mode == :tabs && !is_first
-        push!(cmd_args, "--new-tab")
-    end
-
+    cmd_args = String[terminal.emulator, "--separate"]
     if terminal.hold
         push!(cmd_args, "--hold")
     end
 
-    # Profile property for tab title
     push!(cmd_args, "-p", "tabtitle=$(target.title)")
-
-    # Execution payload (-e must be the final option for konsole)
     push!(cmd_args,
           "-e",
           "sshpass",
@@ -79,70 +59,100 @@ function build_terminal_command(target::SshTarget,
           "LogLevel=$(globals.log_level)",
           "$(target.user)@$(target.host)")
 
-    # Wrap in Cmd and attach SSHPASS to the process environment while retaining desktop session variables
     target_env = merge(copy(ENV), Dict("SSHPASS" => target.password))
     base_cmd = Cmd(cmd_args)
     return setenv(base_cmd, target_env)
 end
 
 """
-    launch_session(
-        target::SshTarget,
+    generate_tabs_file_content(
+        targets::AbstractVector{SshTarget},
         globals::GlobalConfig,
-        terminal::TerminalOptions;
-        is_first::Bool = false,
-        dry_run::Bool = false,
-    )::Union{Cmd, Base.Process}
+    )::String
 
-Launch an individual SSH session in a new terminal tab or window.
+Generate the content of a Konsole tabs definition file (`--tabs-from-file`).
 """
-function launch_session(target::SshTarget,
-                        globals::GlobalConfig,
-                        terminal::TerminalOptions;
-                        is_first::Bool=false,
-                        dry_run::Bool=false)::Union{Cmd, Base.Process}
-    cmd = build_terminal_command(target, globals, terminal; is_first=is_first)
-
-    @info "Spawning session" host=target.host port=target.port user=target.user title=target.title mode=terminal.mode is_first=is_first dry_run=dry_run
-
-    if dry_run
-        return cmd
+function generate_tabs_file_content(targets::AbstractVector{SshTarget},
+                                    globals::GlobalConfig)::String
+    lines = String[]
+    for target in targets
+        policy = resolve_host_key_policy(target, globals)
+        escaped_password = replace(target.password, '\'' => "'\\''")
+        ssh_cmd = "env SSHPASS='$(escaped_password)' sshpass -e ssh -p $(target.port) -o StrictHostKeyChecking=$(policy) -o ConnectTimeout=$(globals.connect_timeout) -o LogLevel=$(globals.log_level) $(target.user)@$(target.host)"
+        push!(lines, "title: $(target.title) ;; command: $(ssh_cmd)")
     end
+    return join(lines, "\n") * "\n"
+end
 
-    return run(cmd; wait=false)
+"""
+    build_tabs_launch_command(
+        config::SessionConfig,
+        tabs_file_path::AbstractString,
+    )::Cmd
+
+Construct the Konsole invocation command to launch all tabs in a single window via `--tabs-from-file`.
+"""
+function build_tabs_launch_command(config::SessionConfig,
+                                   tabs_file_path::AbstractString)::Cmd
+    cmd_args = String[config.terminal.emulator, "--tabs-from-file", tabs_file_path]
+    if config.terminal.hold
+        push!(cmd_args, "--hold")
+    end
+    return Cmd(cmd_args)
 end
 
 """
     launch_all_sessions(
         config::SessionConfig;
         dry_run::Bool = false,
-        tab_delay::Real = 0.2,
     )::Vector{Union{Cmd, Base.Process}}
 
-Iterate and asynchronously spawn terminal tabs for all targets defined in [`SessionConfig`](@ref).
+Spawn terminal sessions for all targets. In `:tabs` mode, creates all tabs within a single Konsole window.
+In `:windows` mode, spawns individual windows for each target.
 """
 function launch_all_sessions(config::SessionConfig;
-                             dry_run::Bool=false,
-                             tab_delay::Real=0.2)::Vector{Union{Cmd, Base.Process}}
+                             dry_run::Bool=false)::Vector{Union{Cmd, Base.Process}}
     if !dry_run
         check_prerequisites(config.terminal)
     end
 
-    processes = Union{Cmd, Base.Process}[]
-    for (idx, target) in enumerate(config.targets)
-        is_first = (idx == 1)
-        proc = launch_session(target,
-                              config.globals,
-                              config.terminal;
-                              is_first=is_first,
-                              dry_run=dry_run)
-        push!(processes, proc)
+    if config.terminal.mode == :tabs
+        tabs_content = generate_tabs_file_content(config.targets, config.globals)
 
-        # Allow Konsole D-Bus registration between rapid successive tab requests
-        if !dry_run && config.terminal.mode == :tabs && idx < length(config.targets)
-            sleep(tab_delay)
+        if dry_run
+            @info "Constructed tabs configuration for single-window launch" total_tabs=length(config.targets)
+            pseudo_cmd = build_tabs_launch_command(config, "<generated-tabs-file>")
+            return Union{Cmd, Base.Process}[pseudo_cmd]
         end
-    end
 
-    return processes
+        tabs_path = tempname() * ".konsole-tabs"
+        open(tabs_path, "w") do io
+            return write(io, tabs_content)
+        end
+        chmod(tabs_path, 0o600)
+
+        cmd = build_tabs_launch_command(config, tabs_path)
+        @info "Launching single Konsole window with tabs" total_tabs=length(config.targets) tabs_file=tabs_path
+        proc = run(cmd; wait=false)
+
+        # Retain temporary tabs file briefly until Konsole has parsed it, then clean up
+        @async begin
+            sleep(3.0)
+            rm(tabs_path; force=true)
+        end
+
+        return Union{Cmd, Base.Process}[proc]
+    else
+        processes = Union{Cmd, Base.Process}[]
+        for target in config.targets
+            cmd = build_single_window_command(target, config.globals, config.terminal)
+            @info "Spawning window session" host=target.host port=target.port user=target.user title=target.title dry_run=dry_run
+            if dry_run
+                push!(processes, cmd)
+            else
+                push!(processes, run(cmd; wait=false))
+            end
+        end
+        return processes
+    end
 end

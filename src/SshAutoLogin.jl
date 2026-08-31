@@ -16,8 +16,9 @@ export SshTarget,
        validate_target_fields,
        validate_global_fields,
        validate_terminal_fields,
-       build_terminal_command,
-       launch_session,
+       build_single_window_command,
+       generate_tabs_file_content,
+       build_tabs_launch_command,
        launch_all_sessions
 
 end # module SshAutoLogin
