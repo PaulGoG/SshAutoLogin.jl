@@ -3,7 +3,7 @@
 Automated multi-session SSH terminal orchestrator tailored for Fedora Linux and KDE Plasma (`konsole`).
 
 ```
-ssh-autologin/
+SshAutoLogin/
 ├── .gitignore               # Credential and artifact exclusions
 ├── .JuliaFormatter.toml     # Formatting rules (YAS style)
 ├── Project.toml             # Root package definition and stdlib compat

@@ -256,7 +256,7 @@ version = "1.11.0"
 
 [[deps.SshAutoLogin]]
 deps = ["TOML"]
-path = "/path/to/workspace"
+path = "/path/to/workspace/SshAutoLogin"
 uuid = "69c3f65a-e256-448a-b8da-79da2ff01621"
 version = "0.1.0"
 
