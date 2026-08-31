@@ -1,0 +1,11 @@
+name = "SshAutoLogin"
+uuid = "69c3f65a-e256-448a-b8da-79da2ff01621"
+authors = ["Computational Engineering <noreply@localhost>"]
+version = "0.1.0"
+
+[deps]
+TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+
+[compat]
+TOML = "1"
+julia = "1.10, 1.11, 1.12"

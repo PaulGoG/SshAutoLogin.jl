@@ -1,0 +1,20 @@
+# Security & Local Credentials
+.env
+config.toml
+*.local.toml
+credentials.toml
+
+# Julia artifacts
+*.jl.cov
+*.jl.*.cov
+*.mem
+*.so
+*.dylib
+*.dll
+
+# Editor & OS artifacts
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
