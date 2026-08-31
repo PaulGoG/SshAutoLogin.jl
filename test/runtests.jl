@@ -12,7 +12,7 @@ using TOML: TOML
         end
 
         @testset "JET.jl Static Analysis" begin
-            JET.test_package(SshAutoLogin)
+            JET.test_package(SshAutoLogin; target_modules=[SshAutoLogin])
         end
 
         @testset "ExplicitImports.jl" begin

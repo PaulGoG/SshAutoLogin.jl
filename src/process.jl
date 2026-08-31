@@ -79,9 +79,10 @@ function build_terminal_command(target::SshTarget,
           "LogLevel=$(globals.log_level)",
           "$(target.user)@$(target.host)")
 
-    # Wrap in Cmd and attach SSHPASS to the process environment
+    # Wrap in Cmd and attach SSHPASS to the process environment while retaining desktop session variables
+    target_env = merge(copy(ENV), Dict("SSHPASS" => target.password))
     base_cmd = Cmd(cmd_args)
-    return setenv(base_cmd, "SSHPASS" => target.password)
+    return setenv(base_cmd, target_env)
 end
 
 """
