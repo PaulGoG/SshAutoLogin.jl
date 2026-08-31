@@ -127,7 +127,7 @@ using TOML: TOML
                                                                             "user" => "root")]))
     end
 
-    @testset "Wrapper Script & Tab File Generation" begin
+    @testset "Runtime Directory & Tab Script Generation" begin
         globals = GlobalConfig(10, "accept-new", "ERROR")
         term_tabs = TerminalOptions("konsole", :tabs, false)
         term_windows = TerminalOptions("konsole", :windows, true)
@@ -135,6 +135,10 @@ using TOML: TOML
         target1 = SshTarget("192.168.1.10", 22, "admin", "p@ssword1", "Primary Node")
         target2 = SshTarget("192.168.1.20", 2222, "guest", "p'ssword2", "Secondary Node",
                             "no")
+
+        # Runtime directory
+        r_dir = get_runtime_directory()
+        @test isdir(r_dir)
 
         # Wrapper script generation
         script1 = generate_target_wrapper_script(target1, globals)
@@ -157,7 +161,7 @@ using TOML: TOML
         # Tabs launch command
         config_tabs = SessionConfig(globals, term_tabs, [target1, target2])
         tab_cmd = build_tabs_launch_command(config_tabs, "/tmp/tabs.txt")
-        @test tab_cmd.exec == ["konsole", "--tabs-from-file", "/tmp/tabs.txt"]
+        @test tab_cmd.exec == ["konsole", "--nofork", "--tabs-from-file", "/tmp/tabs.txt"]
 
         # Windows mode command
         win_cmd = build_single_window_command(target1, globals, term_windows)
@@ -175,7 +179,7 @@ using TOML: TOML
         dry_run_tabs = launch_all_sessions(config_tabs; dry_run=true)
         @test length(dry_run_tabs) == 1
         @test dry_run_tabs[1].exec ==
-              ["konsole", "--tabs-from-file", "<generated-tabs-file>"]
+              ["konsole", "--nofork", "--tabs-from-file", "<generated-tabs-file>"]
 
         # Launch all sessions in dry-run mode for windows
         config_windows = SessionConfig(globals, term_windows, [target1, target2])

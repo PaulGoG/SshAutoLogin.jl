@@ -25,6 +25,19 @@ function resolve_host_key_policy(target::SshTarget, globals::GlobalConfig)::Stri
 end
 
 """
+    get_runtime_directory()::String
+
+Resolve and initialize a secure, user-private in-memory runtime directory (`XDG_RUNTIME_DIR`).
+"""
+function get_runtime_directory()::String
+    base_dir = get(ENV, "XDG_RUNTIME_DIR", joinpath(homedir(), ".cache"))
+    dir_path = joinpath(base_dir, "ssh-autologin")
+    mkpath(dir_path)
+    chmod(dir_path, 0o700)
+    return dir_path
+end
+
+"""
     build_single_window_command(
         target::SshTarget,
         globals::GlobalConfig,
@@ -70,7 +83,7 @@ end
         globals::GlobalConfig,
     )::String
 
-Generate the content of a secure, transient shell wrapper script for a given target.
+Generate the content of a secure shell wrapper script for a given target.
 """
 function generate_target_wrapper_script(target::SshTarget,
                                         globals::GlobalConfig)::String
@@ -111,7 +124,8 @@ Construct the Konsole invocation command to launch all tabs in a single window v
 """
 function build_tabs_launch_command(config::SessionConfig,
                                    tabs_file_path::AbstractString)::Cmd
-    cmd_args = String[config.terminal.emulator, "--tabs-from-file", tabs_file_path]
+    cmd_args = String[config.terminal.emulator, "--nofork", "--tabs-from-file",
+                      tabs_file_path]
     if config.terminal.hold
         push!(cmd_args, "--hold")
     end
@@ -140,12 +154,11 @@ function launch_all_sessions(config::SessionConfig;
             return Union{Cmd, Base.Process}[pseudo_cmd]
         end
 
-        session_tmpdir = mktempdir(; prefix="ssh_tabs_")
-        chmod(session_tmpdir, 0o700)
+        session_dir = get_runtime_directory()
 
         wrapper_paths = String[]
         for (idx, target) in enumerate(config.targets)
-            wrapper_file = joinpath(session_tmpdir, "target_$(idx).sh")
+            wrapper_file = joinpath(session_dir, "target_$(idx).sh")
             open(wrapper_file, "w") do io
                 return write(io, generate_target_wrapper_script(target, config.globals))
             end
@@ -153,7 +166,7 @@ function launch_all_sessions(config::SessionConfig;
             push!(wrapper_paths, wrapper_file)
         end
 
-        tabs_path = joinpath(session_tmpdir, "tabs.konsole")
+        tabs_path = joinpath(session_dir, "tabs.konsole")
         open(tabs_path, "w") do io
             return write(io, generate_tabs_file_content(config.targets, wrapper_paths))
         end
@@ -162,13 +175,6 @@ function launch_all_sessions(config::SessionConfig;
         cmd = build_tabs_launch_command(config, tabs_path)
         @info "Launching single Konsole window with tabs" total_tabs=length(config.targets) tabs_file=tabs_path
         proc = run(cmd; wait=false)
-
-        # Retain temporary directory briefly until Konsole has ingested all tabs, then clean up
-        @async begin
-            sleep(4.0)
-            rm(session_tmpdir; recursive=true, force=true)
-        end
-
         return Union{Cmd, Base.Process}[proc]
     else
         processes = Union{Cmd, Base.Process}[]
