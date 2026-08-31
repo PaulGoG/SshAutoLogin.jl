@@ -127,7 +127,7 @@ using TOML: TOML
                                                                             "user" => "root")]))
     end
 
-    @testset "Tab File Generation & Command Construction" begin
+    @testset "Wrapper Script & Tab File Generation" begin
         globals = GlobalConfig(10, "accept-new", "ERROR")
         term_tabs = TerminalOptions("konsole", :tabs, false)
         term_windows = TerminalOptions("konsole", :windows, true)
@@ -136,17 +136,23 @@ using TOML: TOML
         target2 = SshTarget("192.168.1.20", 2222, "guest", "p'ssword2", "Secondary Node",
                             "no")
 
-        # Tabs file generation
-        tabs_str = generate_tabs_file_content([target1, target2], globals)
-        @test occursin("title: Primary Node ;; command: env SSHPASS='p@ssword1'", tabs_str)
-        @test occursin("StrictHostKeyChecking=accept-new", tabs_str)
-        @test occursin("admin@192.168.1.10", tabs_str)
+        # Wrapper script generation
+        script1 = generate_target_wrapper_script(target1, globals)
+        @test occursin("export SSHPASS='p@ssword1'", script1)
+        @test occursin("StrictHostKeyChecking=accept-new", script1)
+        @test occursin("admin@192.168.1.10", script1)
 
-        # Password with quotes escaping
-        @test occursin("title: Secondary Node ;; command: env SSHPASS='p'\\''ssword2'",
-                       tabs_str)
-        @test occursin("StrictHostKeyChecking=no", tabs_str)
-        @test occursin("guest@192.168.1.20", tabs_str)
+        # Quotes escaping in password
+        script2 = generate_target_wrapper_script(target2, globals)
+        @test occursin("export SSHPASS='p'\\''ssword2'", script2)
+        @test occursin("StrictHostKeyChecking=no", script2)
+        @test occursin("guest@192.168.1.20", script2)
+
+        # Tabs file generation
+        wrapper_paths = ["/tmp/t1.sh", "/tmp/t2.sh"]
+        tabs_str = generate_tabs_file_content([target1, target2], wrapper_paths)
+        @test occursin("title: Primary Node ;; command: /tmp/t1.sh", tabs_str)
+        @test occursin("title: Secondary Node ;; command: /tmp/t2.sh", tabs_str)
 
         # Tabs launch command
         config_tabs = SessionConfig(globals, term_tabs, [target1, target2])

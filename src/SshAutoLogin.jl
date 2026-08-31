@@ -17,6 +17,7 @@ export SshTarget,
        validate_global_fields,
        validate_terminal_fields,
        build_single_window_command,
+       generate_target_wrapper_script,
        generate_tabs_file_content,
        build_tabs_launch_command,
        launch_all_sessions

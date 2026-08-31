@@ -65,21 +65,38 @@ function build_single_window_command(target::SshTarget,
 end
 
 """
-    generate_tabs_file_content(
-        targets::AbstractVector{SshTarget},
+    generate_target_wrapper_script(
+        target::SshTarget,
         globals::GlobalConfig,
     )::String
 
-Generate the content of a Konsole tabs definition file (`--tabs-from-file`).
+Generate the content of a secure, transient shell wrapper script for a given target.
+"""
+function generate_target_wrapper_script(target::SshTarget,
+                                        globals::GlobalConfig)::String
+    policy = resolve_host_key_policy(target, globals)
+    escaped_password = replace(target.password, '\'' => "'\\''")
+
+    return """
+    #!/bin/bash
+    export SSHPASS='$(escaped_password)'
+    exec sshpass -e ssh -p $(target.port) -o StrictHostKeyChecking=$(policy) -o ConnectTimeout=$(globals.connect_timeout) -o LogLevel=$(globals.log_level) $(target.user)@$(target.host)
+    """
+end
+
+"""
+    generate_tabs_file_content(
+        targets::AbstractVector{SshTarget},
+        wrapper_paths::AbstractVector{<:AbstractString},
+    )::String
+
+Generate the content of a Konsole tabs definition file referencing executable wrapper scripts.
 """
 function generate_tabs_file_content(targets::AbstractVector{SshTarget},
-                                    globals::GlobalConfig)::String
+                                    wrapper_paths::AbstractVector{<:AbstractString})::String
     lines = String[]
-    for target in targets
-        policy = resolve_host_key_policy(target, globals)
-        escaped_password = replace(target.password, '\'' => "'\\''")
-        ssh_cmd = "env SSHPASS='$(escaped_password)' sshpass -e ssh -p $(target.port) -o StrictHostKeyChecking=$(policy) -o ConnectTimeout=$(globals.connect_timeout) -o LogLevel=$(globals.log_level) $(target.user)@$(target.host)"
-        push!(lines, "title: $(target.title) ;; command: $(ssh_cmd)")
+    for (target, wrapper_path) in zip(targets, wrapper_paths)
+        push!(lines, "title: $(target.title) ;; command: $(wrapper_path)")
     end
     return join(lines, "\n") * "\n"
 end
@@ -117,17 +134,28 @@ function launch_all_sessions(config::SessionConfig;
     end
 
     if config.terminal.mode == :tabs
-        tabs_content = generate_tabs_file_content(config.targets, config.globals)
-
         if dry_run
             @info "Constructed tabs configuration for single-window launch" total_tabs=length(config.targets)
             pseudo_cmd = build_tabs_launch_command(config, "<generated-tabs-file>")
             return Union{Cmd, Base.Process}[pseudo_cmd]
         end
 
-        tabs_path = tempname() * ".konsole-tabs"
+        session_tmpdir = mktempdir(; prefix="ssh_tabs_")
+        chmod(session_tmpdir, 0o700)
+
+        wrapper_paths = String[]
+        for (idx, target) in enumerate(config.targets)
+            wrapper_file = joinpath(session_tmpdir, "target_$(idx).sh")
+            open(wrapper_file, "w") do io
+                return write(io, generate_target_wrapper_script(target, config.globals))
+            end
+            chmod(wrapper_file, 0o700)
+            push!(wrapper_paths, wrapper_file)
+        end
+
+        tabs_path = joinpath(session_tmpdir, "tabs.konsole")
         open(tabs_path, "w") do io
-            return write(io, tabs_content)
+            return write(io, generate_tabs_file_content(config.targets, wrapper_paths))
         end
         chmod(tabs_path, 0o600)
 
@@ -135,10 +163,10 @@ function launch_all_sessions(config::SessionConfig;
         @info "Launching single Konsole window with tabs" total_tabs=length(config.targets) tabs_file=tabs_path
         proc = run(cmd; wait=false)
 
-        # Retain temporary tabs file briefly until Konsole has parsed it, then clean up
+        # Retain temporary directory briefly until Konsole has ingested all tabs, then clean up
         @async begin
-            sleep(3.0)
-            rm(tabs_path; force=true)
+            sleep(4.0)
+            rm(session_tmpdir; recursive=true, force=true)
         end
 
         return Union{Cmd, Base.Process}[proc]
