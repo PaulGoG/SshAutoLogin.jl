@@ -6,6 +6,7 @@ Automated multi-session SSH terminal orchestrator tailored for Fedora Linux and 
 SshAutoLogin/
 ├── .gitignore               # Credential and artifact exclusions
 ├── .JuliaFormatter.toml     # Formatting rules (YAS style)
+├── LICENSE                  # MIT License
 ├── Project.toml             # Root package definition and stdlib compat
 ├── activate.jl              # Pure-Julia root environment activation script
 ├── config.example.toml      # Reference TOML configuration template
@@ -52,14 +53,14 @@ Host key verification is configurable globally and overridable per target in the
 - `"yes"`: Enforces strict host key checking. Connection aborts or prompts if host key is absent.
 - `"no"`: Disables host key verification (suitable only for ephemeral testing clusters).
 
-### Asynchronous Tab Multiplexing
-Sessions are launched asynchronously with minimal inter-process delays (`tab_delay = 0.2s`) to ensure the KDE Plasma D-Bus server reliably registers tab ordering within a single Konsole window.
+### Single-Window Tab Multiplexing
+Sessions are launched using Konsole's native `--tabs-from-file` specification and `--nofork` execution mode, backed by persistent in-memory scripts in `XDG_RUNTIME_DIR` (`0o700`).
 
 ---
 
 ## 3. Configuration Specification
 
-Create a `config.toml` file (see [`config.example.toml`](file:///path/to/workspace/config.example.toml)):
+Create a `config.toml` file (see [`config.example.toml`](file:///path/to/workspace/SshAutoLogin/config.example.toml)):
 
 ```toml
 [globals]
@@ -123,3 +124,9 @@ Activate and execute the test suite (comprising Aqua.jl static analysis, JET.jl 
 julia test/activate.jl
 julia --project=test test/runtests.jl
 ```
+
+---
+
+## 6. License
+
+This project is licensed under the [MIT License](LICENSE).
