@@ -1,19 +1,17 @@
-# Security & Local Credentials
-.env
+# Local configuration with credentials
 config.toml
 *.local.toml
 credentials.toml
+.env
 
-# Julia artifacts
+# Julia environment and coverage artifacts
+/Manifest.toml
 test/Manifest.toml
 *.jl.cov
 *.jl.*.cov
-*.mem
-*.so
-*.dylib
-*.dll
+*.jl.mem
 
-# Editor & OS artifacts
+# Editor and OS artifacts
 .DS_Store
 .vscode/
 .idea/
