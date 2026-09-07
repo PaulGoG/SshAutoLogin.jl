@@ -1,56 +1,50 @@
-# Configuration file for automated SSH terminal tab orchestration
+# SshAutoLogin configuration template. Copy to config.toml (ignored by git) and edit.
 
 [globals]
-# SSH connection timeout in seconds
+# OpenSSH ConnectTimeout
 connect_timeout = 10  # integer > 0; units: s
 
-# SSH host key verification policy
+# Host-key verification policy
 strict_host_key_checking = "accept-new"  # one of: "accept-new" | "yes" | "no"
 
-# OpenSSH log verbosity level
+# OpenSSH LogLevel
 log_level = "ERROR"  # one of: "QUIET" | "FATAL" | "ERROR" | "INFO" | "VERBOSE" | "DEBUG"
 
 [terminal]
-# Target terminal emulator executable
+# Terminal emulator executable
 emulator = "konsole"  # one of: "konsole"
 
-# Window aggregation mode
+# Window layout
 mode = "tabs"  # one of: "tabs" | "windows"
 
-# Retain terminal tab after SSH process exits
+# Keep each tab open after the SSH session ends, until Enter is pressed
 hold = false  # one of: true | false
 
+# Time allowed for the emulator to start every session before a warning is issued
+launch_settle_timeout = 30  # number > 0; units: s
+
 [[targets]]
-# Target hostname or IPv4/IPv6 address
+# Host name, IPv4 address, or IPv6 literal
 host = "192.168.1.100"
 
-# SSH daemon port number
-port = 22  # integer in range [1, 65535]
+# SSH daemon port
+port = 22  # integer in [1, 65535]
 
-# Remote username
+# Remote account name
 user = "admin"
 
 # Authentication password
 password = "example_password_1"
 
-# Tab or window display title (optional)
+# Tab or window title (optional; default: user@host:port)
 title = "Cluster Node 01"
 
-# Target-specific host key checking policy override (optional)
+# Host-key policy override for this target (optional)
 strict_host_key_checking = "accept-new"  # one of: "accept-new" | "yes" | "no"
 
 [[targets]]
-# Target hostname or IPv4/IPv6 address
 host = "192.168.1.101"
-
-# SSH daemon port number
-port = 2222  # integer in range [1, 65535]
-
-# Remote username
+port = 2222
 user = "developer"
-
-# Authentication password
 password = "example_password_2"
-
-# Tab or window display title (optional)
 title = "Dev Gateway"

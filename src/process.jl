@@ -1,226 +1,290 @@
 """
+    MissingBinaryError
+
+Thrown when a required executable (`ssh`, `sshpass`, or the terminal emulator) is not
+found in `PATH`.
+"""
+struct MissingBinaryError <: Exception
+    binaries::Vector{String}
+end
+
+function Base.showerror(io::IO, err::MissingBinaryError)
+    return print(io, "Required system binaries not found in PATH: ",
+                 join(err.binaries, ", "),
+                 ". Install them (Fedora: 'sudo dnf install sshpass openssh-clients konsole').")
+end
+
+"""
     check_prerequisites(terminal::TerminalOptions)
 
-Verify that the required system binaries (`ssh`, `sshpass`, and the terminal emulator) exist in `PATH`.
-Throws `ErrorException` if any prerequisite is missing.
+Throw [`MissingBinaryError`](@ref) unless `ssh`, `sshpass`, and the configured terminal
+emulator are all found in `PATH`.
 """
 function check_prerequisites(terminal::TerminalOptions)
-    required_binaries = ["ssh", "sshpass", terminal.emulator]
-    missing_binaries = filter(bin -> Sys.which(bin) === nothing, required_binaries)
-    if !isempty(missing_binaries)
-        throw(ErrorException(
-            "Missing required system binaries in PATH: $(join(missing_binaries, ", ")). " *
-            "Please ensure they are installed (e.g. 'sudo dnf install sshpass')."
-        ))
-    end
+    required = ["ssh", "sshpass", terminal.emulator]
+    missing_binaries = filter(name -> Sys.which(name) === nothing, required)
+    isempty(missing_binaries) || throw(MissingBinaryError(missing_binaries))
     return nothing
 end
 
 """
     resolve_host_key_policy(target::SshTarget, globals::GlobalConfig)::String
 
-Determine the effective host key verification policy for a given target, respecting overrides.
+Return the per-target host-key policy override when set, otherwise the global policy.
 """
 function resolve_host_key_policy(target::SshTarget, globals::GlobalConfig)::String
-    return target.strict_host_key_checking !== nothing ? target.strict_host_key_checking : globals.strict_host_key_checking
+    override = target.strict_host_key_checking
+    return override === nothing ? globals.strict_host_key_checking : override
 end
+
+"""
+    command_string(cmd::Cmd)::String
+
+Render the argument vector of `cmd` as a POSIX-shell-quoted string. The environment of
+`cmd` is deliberately not rendered, so the result is safe to print or log.
+"""
+command_string(cmd::Cmd)::String = Base.shell_escape_posixly(cmd.exec...)
 
 """
     get_runtime_directory()::String
 
-Resolve and initialize a secure, user-private in-memory runtime directory (`XDG_RUNTIME_DIR`).
+Return a user-private directory (mode `0700`) for the transient wrapper scripts.
+Under a systemd user session this is `\$XDG_RUNTIME_DIR/ssh-autologin`, which lives on
+an in-memory file system. If `XDG_RUNTIME_DIR` is unset or missing, a fresh temporary
+directory on the regular file system is created instead and a warning is emitted.
 """
 function get_runtime_directory()::String
-    base_dir = get(ENV, "XDG_RUNTIME_DIR", joinpath(homedir(), ".cache"))
-    dir_path = joinpath(base_dir, "ssh-autologin")
-    mkpath(dir_path)
-    chmod(dir_path, 0o700)
-    return dir_path
+    base = get(ENV, "XDG_RUNTIME_DIR", "")
+    if isempty(base) || !isdir(base)
+        directory = mktempdir(; prefix="ssh-autologin-", cleanup=false)
+        @warn "XDG_RUNTIME_DIR is not available; wrapper scripts will be written to a temporary directory on the regular file system" directory
+        return directory
+    end
+    directory = joinpath(base, "ssh-autologin")
+    mkpath(directory)
+    chmod(directory, 0o700)
+    return directory
 end
 
 """
-    clean_runtime_directory!(dir_path::AbstractString = get_runtime_directory())
+    clean_runtime_directory!(directory::AbstractString=get_runtime_directory())
 
-Purge all transient wrapper scripts and tab configuration files from the runtime directory.
+Remove every file left in the runtime directory by a previous launch.
 """
-function clean_runtime_directory!(dir_path::AbstractString = get_runtime_directory())
-    if isdir(dir_path)
-        for item in readdir(dir_path; join = true)
-            rm(item; recursive = true, force = true)
+function clean_runtime_directory!(directory::AbstractString=get_runtime_directory())
+    if isdir(directory)
+        for entry in readdir(directory; join=true)
+            rm(entry; recursive=true, force=true)
         end
     end
     return nothing
 end
 
 """
-    build_single_window_command(
-        target::SshTarget,
-        globals::GlobalConfig,
-        terminal::TerminalOptions,
-    )::Cmd
+    ssh_arguments(target::SshTarget, globals::GlobalConfig)::Vector{String}
 
-Construct a command to spawn an independent single Konsole window.
+Return the `ssh` argument vector for `target`, including the resolved host-key policy,
+the connection timeout, the log level, and a single password prompt.
 """
-function build_single_window_command(
-    target::SshTarget,
-    globals::GlobalConfig,
-    terminal::TerminalOptions,
-)::Cmd
+function ssh_arguments(target::SshTarget, globals::GlobalConfig)::Vector{String}
     policy = resolve_host_key_policy(target, globals)
-    
-    cmd_args = String[terminal.emulator, "--separate"]
-    if terminal.hold
-        push!(cmd_args, "--hold")
-    end
-
-    push!(cmd_args, "-p", "tabtitle=$(target.title)")
-    push!(
-        cmd_args,
-        "-e",
-        "sshpass",
-        "-e",
-        "ssh",
-        "-p",
-        string(target.port),
-        "-o",
-        "StrictHostKeyChecking=$(policy)",
-        "-o",
-        "ConnectTimeout=$(globals.connect_timeout)",
-        "-o",
-        "LogLevel=$(globals.log_level)",
-        "$(target.user)@$(target.host)",
-    )
-
-    target_env = merge(copy(ENV), Dict("SSHPASS" => target.password))
-    base_cmd = Cmd(cmd_args)
-    return setenv(base_cmd, target_env)
+    return String["ssh", "-p", string(target.port), "-o", "StrictHostKeyChecking=$(policy)",
+                  "-o", "ConnectTimeout=$(globals.connect_timeout)", "-o",
+                  "LogLevel=$(globals.log_level)", "-o", "NumberOfPasswordPrompts=1",
+                  "$(target.user)@$(target.host)"]
 end
 
 """
-    generate_target_wrapper_script(
-        target::SshTarget,
-        globals::GlobalConfig,
-    )::String
+    generate_target_wrapper_script(target::SshTarget, globals::GlobalConfig;
+                                   hold::Bool=false)::String
 
-Generate the content of a self-destructing shell wrapper script for a given target.
-The script immediately deletes itself from the filesystem (`rm -f -- \"\$0\"`) upon invocation.
+Return the text of the Bash wrapper that opens the SSH session for `target`.
+
+The script unlinks itself as its first action, exposes the password to `sshpass` through
+file descriptor 3 (a pipe fed by a process substitution, so the secret appears in no
+environment or argument vector), and replaces itself with `sshpass -d 3 ssh ...`. With
+`hold = true` the script instead waits for the session to end, prints its exit status,
+and waits for a key press before the tab closes. Every interpolated value is quoted
+with `Base.shell_escape_posixly`.
 """
-function generate_target_wrapper_script(
-    target::SshTarget,
-    globals::GlobalConfig,
-)::String
-    policy = resolve_host_key_policy(target, globals)
-    escaped_password = replace(target.password, '\'' => "'\\''")
-    
-    return """
-    #!/bin/bash
-    rm -f -- "\$0"
-    export SSHPASS='$(escaped_password)'
-    exec sshpass -e ssh -p $(target.port) -o StrictHostKeyChecking=$(policy) -o ConnectTimeout=$(globals.connect_timeout) -o LogLevel=$(globals.log_level) $(target.user)@$(target.host)
-    """
+function generate_target_wrapper_script(target::SshTarget, globals::GlobalConfig;
+                                        hold::Bool=false)::String
+    quoted_password = Base.shell_escape_posixly(target.password)
+    session_command = Base.shell_escape_posixly("sshpass", "-d", "3",
+                                                ssh_arguments(target, globals)...)
+    header = """
+             #!/usr/bin/env bash
+             # Generated by SshAutoLogin.jl; removed from the file system on first execution.
+             rm -f -- "\$0"
+             exec 3< <(printf -- '%s\\n' $(quoted_password))
+             """
+    if hold
+        return header * """
+                        $(session_command)
+                        status=\$?
+                        exec 3<&-
+                        printf '\\nSSH session ended with exit status %d. Press Enter to close this tab.\\n' "\$status"
+                        read -r _
+                        """
+    end
+    return header * "exec $(session_command)\n"
 end
 
 """
-    generate_tabs_file_content(
-        targets::AbstractVector{SshTarget},
-        wrapper_paths::AbstractVector{<:AbstractString},
-    )::String
+    generate_tabs_file_content(targets, wrapper_paths)::String
 
-Generate the content of a Konsole tabs definition file referencing executable wrapper scripts.
+Return the Konsole `--tabs-from-file` specification: one `title: ... ;; command: ...`
+line per target, each command being the target's wrapper script.
 """
-function generate_tabs_file_content(
-    targets::AbstractVector{SshTarget},
-    wrapper_paths::AbstractVector{<:AbstractString},
-)::String
-    lines = String[]
-    for (target, wrapper_path) in zip(targets, wrapper_paths)
-        push!(lines, "title: $(target.title) ;; command: $(wrapper_path)")
-    end
+function generate_tabs_file_content(targets::AbstractVector{SshTarget},
+                                    wrapper_paths::AbstractVector{<:AbstractString})::String
+    length(targets) == length(wrapper_paths) ||
+        throw(DimensionMismatch("$(length(targets)) targets but $(length(wrapper_paths)) wrapper paths."))
+    lines = ["title: $(target.title) ;; command: $(path)"
+             for (target, path) in zip(targets, wrapper_paths)]
     return join(lines, "\n") * "\n"
 end
 
 """
-    build_tabs_launch_command(
-        config::SessionConfig,
-        tabs_file_path::AbstractString,
-    )::Cmd
+    build_tabs_launch_command(config::SessionConfig, tabs_file_path::AbstractString)::Cmd
 
-Construct the Konsole invocation command to launch all tabs in a single window via `--tabs-from-file`.
+Return the command that opens one emulator window with all tabs described in
+`tabs_file_path`. `--nofork` keeps the emulator attached to the launching process so
+that the wrapper scripts are consumed before the launcher returns.
 """
-function build_tabs_launch_command(
-    config::SessionConfig,
-    tabs_file_path::AbstractString,
-)::Cmd
-    cmd_args = String[config.terminal.emulator, "--nofork", "--tabs-from-file", tabs_file_path]
-    if config.terminal.hold
-        push!(cmd_args, "--hold")
-    end
-    return Cmd(cmd_args)
+function build_tabs_launch_command(config::SessionConfig,
+                                   tabs_file_path::AbstractString)::Cmd
+    return Cmd(String[config.terminal.emulator, "--nofork", "--tabs-from-file",
+                      tabs_file_path])
 end
 
 """
-    launch_all_sessions(
-        config::SessionConfig;
-        dry_run::Bool = false,
-    )::Vector{Union{Cmd, Base.Process}}
+    build_single_window_command(target::SshTarget, terminal::TerminalOptions,
+                                wrapper_path::AbstractString)::Cmd
 
-Spawn terminal sessions for all targets. In `:tabs` mode, creates all tabs within a single Konsole window.
-In `:windows` mode, spawns individual windows for each target.
+Return the command that opens a separate emulator window running the wrapper script of
+`target`.
 """
-function launch_all_sessions(
-    config::SessionConfig;
-    dry_run::Bool = false,
-)::Vector{Union{Cmd, Base.Process}}
-    if !dry_run
-        check_prerequisites(config.terminal)
-    end
+function build_single_window_command(target::SshTarget, terminal::TerminalOptions,
+                                     wrapper_path::AbstractString)::Cmd
+    return Cmd(String[terminal.emulator, "--separate", "-p", "tabtitle=$(target.title)",
+                      "-e", wrapper_path])
+end
 
+"""
+    plan_sessions(config::SessionConfig)::Vector{Cmd}
+
+Return the emulator commands that [`launch_sessions`](@ref) would execute, with the
+runtime directory replaced by the placeholder `<runtime-dir>`. Nothing is written or
+executed, and the result contains no credentials.
+"""
+function plan_sessions(config::SessionConfig)::Vector{Cmd}
+    placeholder = "<runtime-dir>"
     if config.terminal.mode == :tabs
-        if dry_run
-            @info "Constructed tabs configuration for single-window launch" total_tabs=length(config.targets)
-            pseudo_cmd = build_tabs_launch_command(config, "<generated-tabs-file>")
-            return Union{Cmd, Base.Process}[pseudo_cmd]
-        end
-
-        session_dir = get_runtime_directory()
-        clean_runtime_directory!(session_dir)
-
-        wrapper_paths = String[]
-        for (idx, target) in enumerate(config.targets)
-            wrapper_file = joinpath(session_dir, "target_$(idx).sh")
-            open(wrapper_file, "w") do io
-                write(io, generate_target_wrapper_script(target, config.globals))
-            end
-            chmod(wrapper_file, 0o700)
-            push!(wrapper_paths, wrapper_file)
-        end
-
-        tabs_path = joinpath(session_dir, "tabs.konsole")
-        open(tabs_path, "w") do io
-            write(io, generate_tabs_file_content(config.targets, wrapper_paths))
-        end
-        chmod(tabs_path, 0o600)
-
-        cmd = build_tabs_launch_command(config, tabs_path)
-        @info "Launching single Konsole window with tabs" total_tabs=length(config.targets) tabs_file=tabs_path
-        proc = run(cmd; wait = false)
-
-        # Synchronously wait brief interval for Konsole to finish reading tabs, then purge runtime files
-        sleep(0.6)
-        clean_runtime_directory!(session_dir)
-
-        return Union{Cmd, Base.Process}[proc]
-    else
-        processes = Union{Cmd, Base.Process}[]
-        for target in config.targets
-            cmd = build_single_window_command(target, config.globals, config.terminal)
-            @info "Spawning window session" host=target.host port=target.port user=target.user title=target.title dry_run=dry_run
-            if dry_run
-                push!(processes, cmd)
-            else
-                push!(processes, run(cmd; wait = false))
-            end
-        end
-        return processes
+        return Cmd[build_tabs_launch_command(config, joinpath(placeholder, "tabs.konsole"))]
     end
+    return Cmd[build_single_window_command(target, config.terminal,
+                                           joinpath(placeholder, "target_$(index).sh"))
+               for (index, target) in enumerate(config.targets)]
+end
+
+"""
+    write_private_file(path::AbstractString, content::AbstractString, mode::Integer)
+
+Create `path` with permission `mode` before writing `content`, so that the content is
+never readable under a permissive umask.
+"""
+function write_private_file(path::AbstractString, content::AbstractString, mode::Integer)
+    touch(path)
+    chmod(path, mode)
+    open(path, "w") do io
+        return write(io, content)
+    end
+    return path
+end
+
+"""
+    write_wrapper_scripts(config::SessionConfig, directory::AbstractString)::Vector{String}
+
+Write one executable (mode `0700`) wrapper script per target into `directory` and return
+their paths in target order.
+"""
+function write_wrapper_scripts(config::SessionConfig,
+                               directory::AbstractString)::Vector{String}
+    paths = String[]
+    for (index, target) in enumerate(config.targets)
+        path = joinpath(directory, "target_$(index).sh")
+        content = generate_target_wrapper_script(target, config.globals;
+                                                 hold=config.terminal.hold)
+        write_private_file(path, content, 0o700)
+        push!(paths, path)
+    end
+    return paths
+end
+
+"""
+    await_wrapper_consumption(wrapper_paths, processes, timeout_seconds::Real)::Bool
+
+Poll until every wrapper script has unlinked itself (which each does on execution),
+until every emulator process has exited, or until `timeout_seconds` elapse. Return
+whether all wrappers were consumed.
+"""
+function await_wrapper_consumption(wrapper_paths::AbstractVector{<:AbstractString},
+                                   processes::AbstractVector{Base.Process},
+                                   timeout_seconds::Real)::Bool
+    deadline = time() + timeout_seconds
+    while time() < deadline
+        all(!isfile, wrapper_paths) && return true
+        all(process_exited, processes) && break
+        sleep(0.05)
+    end
+    return all(!isfile, wrapper_paths)
+end
+
+"""
+    launch_sessions(config::SessionConfig)::Vector{Base.Process}
+
+Open the SSH sessions of `config` in the terminal emulator and return the emulator
+processes (one for `:tabs` mode, one per target for `:windows` mode).
+
+Wrapper scripts are written to the runtime directory, the emulator is started, and the
+function waits (at most `config.terminal.launch_settle_timeout` seconds) until every
+wrapper has been executed and has removed itself; the tabs specification is removed
+afterwards. If the emulator exits early or the wait times out, a warning is emitted and
+the remaining files are left in place for inspection; they are purged at the next
+launch.
+"""
+function launch_sessions(config::SessionConfig)::Vector{Base.Process}
+    check_prerequisites(config.terminal)
+    directory = get_runtime_directory()
+    clean_runtime_directory!(directory)
+    wrapper_paths = write_wrapper_scripts(config, directory)
+
+    processes = Base.Process[]
+    tabs_path = ""
+    if config.terminal.mode == :tabs
+        tabs_path = joinpath(directory, "tabs.konsole")
+        write_private_file(tabs_path,
+                           generate_tabs_file_content(config.targets, wrapper_paths), 0o600)
+        @info "Launching terminal window" emulator=config.terminal.emulator tabs=length(config.targets)
+        push!(processes, run(build_tabs_launch_command(config, tabs_path); wait=false))
+    else
+        for (target, wrapper_path) in zip(config.targets, wrapper_paths)
+            @info "Launching terminal window" emulator=config.terminal.emulator host=target.host port=target.port user=target.user title=target.title
+            push!(processes,
+                  run(build_single_window_command(target, config.terminal, wrapper_path);
+                      wait=false))
+        end
+    end
+
+    consumed = await_wrapper_consumption(wrapper_paths, processes,
+                                         config.terminal.launch_settle_timeout)
+    if consumed
+        isempty(tabs_path) || rm(tabs_path; force=true)
+    else
+        remaining = filter(isfile, wrapper_paths)
+        exit_codes = [process_exited(p) ? p.exitcode : nothing for p in processes]
+        @warn "Not every wrapper script was executed within the settle timeout; runtime files are left in place and will be purged at the next launch" timeout_seconds=config.terminal.launch_settle_timeout remaining emulator_exit_codes=exit_codes
+    end
+    return processes
 end

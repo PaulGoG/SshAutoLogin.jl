@@ -1,15 +1,21 @@
 """
     SshTarget
 
-Immutable specification of a single remote SSH target endpoint.
+Immutable description of one remote SSH endpoint.
 
 # Fields
-- `host::String`: Target hostname or IPv4/IPv6 address.
-- `port::Int`: Remote SSH daemon port (bounded in `1:65535`).
-- `user::String`: Authentication username.
-- `password::String`: Authentication password.
-- `title::String`: Terminal tab/window title.
-- `strict_host_key_checking::Union{Nothing, String}`: Target-specific host key policy override.
+- `host::String`: host name, IPv4 address, or IPv6 literal.
+- `port::Int`: SSH daemon port in `1:65535`.
+- `user::String`: account name on the remote host.
+- `password::String`: authentication password; never rendered by `show`.
+- `title::String`: terminal tab or window title; defaults to `user@host:port`.
+- `strict_host_key_checking::Union{Nothing, String}`: per-target host-key policy
+  override, or `nothing` to inherit the global policy.
+
+# Example
+```julia
+target = SshTarget("node01.cluster.local", 22, "scientist", "secret", "Node 01")
+```
 """
 struct SshTarget
     host::String
@@ -19,47 +25,37 @@ struct SshTarget
     title::String
     strict_host_key_checking::Union{Nothing, String}
 
-    function SshTarget(host::AbstractString,
-                       port::Integer,
-                       user::AbstractString,
-                       password::AbstractString,
-                       title::AbstractString="",
+    function SshTarget(host::AbstractString, port::Integer, user::AbstractString,
+                       password::AbstractString, title::AbstractString="",
                        strict_host_key_checking::Union{Nothing, AbstractString}=nothing)
-        validate_target_fields(host, port, user, password, strict_host_key_checking)
+        validate_target_fields(host, port, user, password, title, strict_host_key_checking)
         resolved_title = isempty(title) ? "$(user)@$(host):$(port)" : String(title)
-        return new(String(host),
-                   Int(port),
-                   String(user),
-                   String(password),
-                   resolved_title,
-                   strict_host_key_checking === nothing ? nothing :
-                   String(strict_host_key_checking))
+        policy = strict_host_key_checking === nothing ? nothing :
+                 String(strict_host_key_checking)
+        return new(String(host), Int(port), String(user), String(password), resolved_title,
+                   policy)
     end
 end
 
-function Base.:(==)(a::SshTarget, b::SshTarget)
-    return a.host == b.host &&
-           a.port == b.port &&
-           a.user == b.user &&
-           a.password == b.password &&
-           a.title == b.title &&
-           a.strict_host_key_checking == b.strict_host_key_checking
-end
-
-function Base.isless(a::SshTarget, b::SshTarget)
-    return a.host == b.host ? (a.port == b.port ? a.user < b.user : a.port < b.port) :
-           a.host < b.host
+function Base.show(io::IO, target::SshTarget)
+    print(io, "SshTarget(", repr(target.title), ", ", target.user, "@", target.host, ":",
+          target.port, ", password = <redacted>")
+    if target.strict_host_key_checking !== nothing
+        print(io, ", strict_host_key_checking = ", repr(target.strict_host_key_checking))
+    end
+    return print(io, ")")
 end
 
 """
     GlobalConfig
 
-Global operational parameters governing SSH connections.
+Connection parameters shared by all targets.
 
 # Fields
-- `connect_timeout::Int`: Connection establishment timeout in seconds.
-- `strict_host_key_checking::String`: Default host key verification policy (`"accept-new"`, `"yes"`, `"no"`).
-- `log_level::String`: OpenSSH logging verbosity level.
+- `connect_timeout::Int`: OpenSSH `ConnectTimeout` in seconds (positive).
+- `strict_host_key_checking::String`: default host-key policy, one of `"accept-new"`,
+  `"yes"`, `"no"`.
+- `log_level::String`: OpenSSH `LogLevel`.
 """
 struct GlobalConfig
     connect_timeout::Int
@@ -78,54 +74,47 @@ end
 """
     TerminalOptions
 
-Configuration for the desktop terminal emulator window manager.
+Terminal-emulator launch parameters.
 
 # Fields
-- `emulator::String`: Binary name of the terminal emulator (default: `"konsole"`).
-- `mode::Symbol`: Window aggregation mode (`:tabs` or `:windows`).
-- `hold::Bool`: Whether to retain the terminal open after child process exit.
+- `emulator::String`: emulator executable; only `"konsole"` is supported.
+- `mode::Symbol`: `:tabs` (one window, one tab per target) or `:windows` (one window per
+  target).
+- `hold::Bool`: keep each tab open after the SSH session ends, waiting for a key press.
+- `launch_settle_timeout::Float64`: seconds to wait for the emulator to consume the
+  generated wrapper scripts before reporting a launch problem.
 """
 struct TerminalOptions
     emulator::String
     mode::Symbol
     hold::Bool
+    launch_settle_timeout::Float64
 
     function TerminalOptions(emulator::AbstractString="konsole",
-                             mode::Union{Symbol, AbstractString}=:tabs,
-                             hold::Bool=false)
+                             mode::Union{Symbol, AbstractString}=:tabs, hold::Bool=false,
+                             launch_settle_timeout::Real=30)
         resolved_mode = Symbol(mode)
-        validate_terminal_fields(emulator, resolved_mode)
-        return new(String(emulator), resolved_mode, hold)
+        validate_terminal_fields(emulator, resolved_mode, launch_settle_timeout)
+        return new(String(emulator), resolved_mode, hold, Float64(launch_settle_timeout))
     end
 end
 
 """
     SessionConfig
 
-Complete session configuration aggregating globals, terminal settings, and targets.
-
-# Fields
-- `globals::GlobalConfig`: Global connection options.
-- `terminal::TerminalOptions`: Terminal manager options.
-- `targets::Vector{SshTarget}`: Ordered list of remote SSH endpoints.
+Complete session description: global connection parameters, terminal options, and the
+ordered list of targets (at least one).
 """
 struct SessionConfig
     globals::GlobalConfig
     terminal::TerminalOptions
     targets::Vector{SshTarget}
 
-    function SessionConfig(globals::GlobalConfig,
-                           terminal::TerminalOptions,
-                           targets::Vector{SshTarget})
+    function SessionConfig(globals::GlobalConfig, terminal::TerminalOptions,
+                           targets::AbstractVector{SshTarget})
         if isempty(targets)
-            throw(ArgumentError("Session configuration must define at least one [[targets]] entry."))
+            throw(ArgumentError("A session configuration must define at least one [[targets]] entry."))
         end
-        return new(globals, terminal, targets)
+        return new(globals, terminal, SshTarget[t for t in targets])
     end
-end
-
-function SessionConfig(globals::GlobalConfig,
-                       terminal::TerminalOptions,
-                       targets::AbstractVector{SshTarget})
-    return SessionConfig(globals, terminal, SshTarget[t for t in targets])
 end
