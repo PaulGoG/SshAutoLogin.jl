@@ -14,7 +14,7 @@ All notable changes to SshAutoLogin.jl are recorded in this file. The format fol
 - `hold` option implemented in the wrapper script, applying to every tab.
 - Bounded wait for the emulator to consume the wrapper scripts (`launch_settle_timeout`), with a warning and retained files when it does not.
 - Command-line entry point `scripts/run.jl` with `--config` and `--dry-run`.
-- Test suite with Aqua, JET, ExplicitImports, a JuliaFormatter check, and launch tests against a stub emulator.
+- Test suite with Aqua, JET, ExplicitImports, and launch tests against a stub emulator; formatting enforced by a dedicated `format/` environment and CI job.
 
 [Unreleased]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/PaulGoG/SshAutoLogin.jl/releases/tag/v0.1.0

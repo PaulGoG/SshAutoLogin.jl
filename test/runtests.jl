@@ -3,7 +3,6 @@ using SshAutoLogin
 using Aqua
 using JET
 using ExplicitImports
-using JuliaFormatter
 
 # Characters that must survive shell quoting unchanged.
 const AWKWARD_PASSWORD = "p'ss#w\$ord`1 -x"
@@ -67,10 +66,6 @@ end
         JET.test_package(SshAutoLogin; target_modules=[SshAutoLogin])
         @test ExplicitImports.check_no_implicit_imports(SshAutoLogin) === nothing
         @test ExplicitImports.check_no_stale_explicit_imports(SshAutoLogin) === nothing
-    end
-
-    @testset "Formatting" begin
-        @test JuliaFormatter.format(pkgdir(SshAutoLogin); overwrite=false)
     end
 
     @testset "Field validation" begin

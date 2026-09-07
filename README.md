@@ -20,6 +20,10 @@ SshAutoLogin/
 ├── SECURITY.md                # Threat model and vulnerability reporting
 ├── activate.jl                # Activates and instantiates the root environment
 ├── config.example.toml        # Configuration template
+├── format/
+│   ├── Project.toml           # Formatting environment (JuliaFormatter 2.14+)
+│   ├── activate.jl            # Activates the formatting environment
+│   └── format.jl              # Formats the repository; --check verifies without writing
 ├── scripts/
 │   └── run.jl                 # Command-line entry point
 ├── src/
@@ -29,7 +33,7 @@ SshAutoLogin/
 │   ├── config.jl              # TOML parsing with schema checks
 │   └── process.jl             # Wrapper scripts, emulator commands, launch logic
 └── test/
-    ├── Project.toml           # Test environment (Aqua, JET, ExplicitImports, JuliaFormatter)
+    ├── Project.toml           # Test environment (Aqua, JET, ExplicitImports)
     ├── activate.jl            # Activates the test environment against the local source
     └── runtests.jl
 ```
@@ -49,6 +53,7 @@ Julia 1.10 or newer.
 ```bash
 julia activate.jl          # root environment
 julia test/activate.jl     # test environment, developed against the local source
+julia format/activate.jl   # formatting environment
 ```
 
 Once the package is registered, `julia -e 'using Pkg; Pkg.add("SshAutoLogin")'` installs it into any environment.
@@ -67,7 +72,8 @@ cp config.example.toml config.toml
 | Use another configuration file | `julia scripts/run.jl --config path/to/config.toml` |
 | Print the emulator commands without launching | `julia scripts/run.jl --dry-run` |
 | Run the test suite | `julia --project=test test/runtests.jl` |
-| Format the sources | `julia --project=test -e 'using JuliaFormatter; format(".")'` |
+| Format the sources | `julia format/format.jl` |
+| Check formatting without writing | `julia format/format.jl --check` |
 
 The script activates its own environment, so `--project` is not needed.
 
