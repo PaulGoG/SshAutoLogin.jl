@@ -60,7 +60,7 @@ Sessions are launched using Konsole's native `--tabs-from-file` specification an
 
 ## 3. Configuration Specification
 
-Create a `config.toml` file (see [`config.example.toml`](file:///path/to/workspace/SshAutoLogin/config.example.toml)):
+Create a `config.toml` file (see [`config.example.toml`](config.example.toml)):
 
 ```toml
 [globals]

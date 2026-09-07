@@ -5,6 +5,7 @@ config.toml
 credentials.toml
 
 # Julia artifacts
+test/Manifest.toml
 *.jl.cov
 *.jl.*.cov
 *.mem
