@@ -1,0 +1,20 @@
+# Changelog
+
+All notable changes to SshAutoLogin.jl are recorded in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-09-07
+
+### Added
+
+- TOML configuration with schema validation: typed keys, rejection of unknown keys, RFC 1123 host names or IP literals, POSIX-style account names, titles free of Konsole's `;;` delimiter.
+- `tabs` mode (one Konsole window, one tab per target, via `--tabs-from-file`) and `windows` mode (one window per target).
+- Self-removing wrapper scripts in `$XDG_RUNTIME_DIR` that hand the password to `sshpass` over a file descriptor, so that no credential appears in an environment, an argument vector, a log, or `--dry-run` output.
+- `hold` option implemented in the wrapper script, applying to every tab.
+- Bounded wait for the emulator to consume the wrapper scripts (`launch_settle_timeout`), with a warning and retained files when it does not.
+- Command-line entry point `scripts/run.jl` with `--config` and `--dry-run`.
+- Test suite with Aqua, JET, ExplicitImports, a JuliaFormatter check, and launch tests against a stub emulator.
+
+[Unreleased]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/PaulGoG/SshAutoLogin.jl/releases/tag/v0.1.0

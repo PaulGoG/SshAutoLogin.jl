@@ -1,132 +1,128 @@
 # SshAutoLogin.jl
 
-Automated multi-session SSH terminal orchestrator tailored for Fedora Linux and KDE Plasma (`konsole`).
+[![CI](https://github.com/PaulGoG/SshAutoLogin.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/PaulGoG/SshAutoLogin.jl/actions/workflows/CI.yml)
+
+Opens one KDE Konsole tab, or one window, per remote host listed in a TOML file and logs in with password authentication, so that a set of compute nodes is reachable with a single command.
 
 ```
 SshAutoLogin/
-├── .gitignore               # Credential and artifact exclusions
-├── .JuliaFormatter.toml     # Formatting rules (YAS style)
-├── LICENSE                  # MIT License
-├── Project.toml             # Root package definition and stdlib compat
-├── activate.jl              # Pure-Julia root environment activation script
-├── config.example.toml      # Reference TOML configuration template
-├── README.md                # Package documentation and architecture guide
-├── src/
-│   ├── SshAutoLogin.jl      # Root module entry point and public exports
-│   ├── types.jl             # Concrete immutable data structures
-│   ├── validation.jl        # Strict parameter and schema validation logic
-│   ├── config.jl            # TOML parser and configuration mapper
-│   └── process.jl           # Command constructor and async process dispatcher
+├── .github/
+│   ├── dependabot.yml         # Monthly updates of the GitHub Actions pins
+│   └── workflows/
+│       ├── CI.yml             # Test suite on Julia LTS, stable, and pre-release
+│       └── TagBot.yml         # Release tagging once the package is registered
+├── .gitignore                 # Credentials, manifests, editor artifacts
+├── .JuliaFormatter.toml       # Formatting rules (YAS style)
+├── CHANGELOG.md               # Release history
+├── LICENSE                    # MIT
+├── Project.toml               # Package metadata and compat bounds
+├── README.md
+├── SECURITY.md                # Threat model and vulnerability reporting
+├── activate.jl                # Activates and instantiates the root environment
+├── config.example.toml        # Configuration template
 ├── scripts/
-│   └── run.jl               # CLI driver script
+│   └── run.jl                 # Command-line entry point
+├── src/
+│   ├── SshAutoLogin.jl        # Module and exports
+│   ├── validation.jl          # Field constraints and patterns
+│   ├── types.jl               # SshTarget, GlobalConfig, TerminalOptions, SessionConfig
+│   ├── config.jl              # TOML parsing with schema checks
+│   └── process.jl             # Wrapper scripts, emulator commands, launch logic
 └── test/
-    ├── Project.toml         # Test environment dependencies (Aqua, JET, etc.)
-    ├── activate.jl          # Test environment activation script
-    └── runtests.jl          # QA and unit test suite
+    ├── Project.toml           # Test environment (Aqua, JET, ExplicitImports, JuliaFormatter)
+    ├── activate.jl            # Activates the test environment against the local source
+    └── runtests.jl
 ```
 
----
+## Requirements
 
-## 1. System Requirements
+Linux with a systemd user session. Fedora with KDE Plasma is the development platform; any distribution that ships Konsole works. The launcher needs Konsole, the OpenSSH client, and `sshpass` 1.06 or newer:
 
-- **Operating System:** Linux (Fedora 40+ / KDE Plasma)
-- **Terminal Emulator:** KDE Konsole (`/usr/bin/konsole`)
-- **Core Utilities:** OpenSSH client (`ssh`), `sshpass`
-  ```bash
-  sudo dnf install -y sshpass
-  ```
-- **Julia Runtime:** Julia ≥ 1.10
-
----
-
-## 2. Architectural Design & Security
-
-### Secure Credential Injection
-Standard OpenSSH enforces direct interactive TTY authentication. To automate multi-session tab launching without exposing plaintext credentials to `/proc/*/cmdline` (`ps aux`), `SshAutoLogin.jl` injects passwords through the `SSHPASS` environment variable coupled with `sshpass -e`:
 ```bash
-SSHPASS="<secret>" konsole --new-tab -p tabtitle="<title>" -e sshpass -e ssh -p <port> <user>@<host>
+sudo dnf install konsole openssh-clients sshpass
 ```
 
-### Configurable Host Key Policy
-Host key verification is configurable globally and overridable per target in the TOML configuration:
-- `"accept-new"` *(Default & Recommended)*: Automatically trusts and saves new remote host keys to `~/.ssh/known_hosts` (Trust-On-First-Use), while strictly refusing connection if a known key has changed (full MITM protection).
-- `"yes"`: Enforces strict host key checking. Connection aborts or prompts if host key is absent.
-- `"no"`: Disables host key verification (suitable only for ephemeral testing clusters).
+Julia 1.10 or newer.
 
-### Single-Window Tab Multiplexing
-Sessions are launched using Konsole's native `--tabs-from-file` specification and `--nofork` execution mode, backed by persistent in-memory scripts in `XDG_RUNTIME_DIR` (`0o700`).
+## Environment setup
 
----
+```bash
+julia activate.jl          # root environment
+julia test/activate.jl     # test environment, developed against the local source
+```
 
-## 3. Configuration Specification
+Once the package is registered, `julia -e 'using Pkg; Pkg.add("SshAutoLogin")'` installs it into any environment.
 
-Create a `config.toml` file (see [`config.example.toml`](config.example.toml)):
+## Usage
+
+Copy the template and fill in the targets. `config.toml` is ignored by git.
+
+```bash
+cp config.example.toml config.toml
+```
+
+| Task | Command |
+|---|---|
+| Open all sessions | `julia scripts/run.jl` |
+| Use another configuration file | `julia scripts/run.jl --config path/to/config.toml` |
+| Print the emulator commands without launching | `julia scripts/run.jl --dry-run` |
+| Run the test suite | `julia --project=test test/runtests.jl` |
+| Format the sources | `julia --project=test -e 'using JuliaFormatter; format(".")'` |
+
+The script activates its own environment, so `--project` is not needed.
+
+From Julia:
+
+```julia
+using SshAutoLogin
+config = load_config("config.toml")
+plan_sessions(config)      # emulator commands, no side effects
+launch_sessions(config)    # opens the sessions and returns the emulator processes
+```
+
+## Configuration
 
 ```toml
 [globals]
-# SSH connection timeout in seconds
-connect_timeout = 10  # integer > 0; units: s
-
-# SSH host key verification policy
+connect_timeout = 10                     # integer > 0; units: s
 strict_host_key_checking = "accept-new"  # one of: "accept-new" | "yes" | "no"
-
-# OpenSSH log verbosity level
-log_level = "ERROR"  # one of: "QUIET" | "FATAL" | "ERROR" | "INFO" | "VERBOSE" | "DEBUG"
+log_level = "ERROR"                      # OpenSSH LogLevel
 
 [terminal]
-# Target terminal emulator executable
-emulator = "konsole"  # one of: "konsole"
-
-# Window aggregation mode
-mode = "tabs"  # one of: "tabs" | "windows"
-
-# Retain terminal tab after SSH process exits
-hold = false  # one of: true | false
+emulator = "konsole"                     # one of: "konsole"
+mode = "tabs"                            # one of: "tabs" | "windows"
+hold = false                             # keep the tab open after the session ends
+launch_settle_timeout = 30               # number > 0; units: s
 
 [[targets]]
-host = "192.168.1.100"
-port = 22
+host = "192.168.1.100"                   # host name, IPv4 address, or IPv6 literal
+port = 22                                # integer in [1, 65535]
 user = "admin"
-password = "target_password_1"
-title = "Cluster Node 01"
-
-[[targets]]
-host = "192.168.1.101"
-port = 2222
-user = "developer"
-password = "target_password_2"
-title = "Dev Gateway"
-strict_host_key_checking = "accept-new"
+password = "example_password_1"
+title = "Cluster Node 01"                # optional; default: user@host:port
+strict_host_key_checking = "accept-new"  # optional per-target override
 ```
 
----
+The parser rejects unknown keys, wrong value types, and values outside the documented constraints, naming the offending key. Host names must satisfy RFC 1123 (IPv4 and IPv6 literals are accepted as well), account names must be a letter or underscore followed by letters, digits, `.`, `_`, or `-`, passwords must be non-empty and free of control characters, and titles must not contain the sequence `;;`, which delimits fields in Konsole's tab list.
 
-## 4. Usage
+## How a session is opened
 
-### Launching Sessions
-To dispatch all configured SSH sessions into tabs in a single Konsole window:
-```bash
-julia --project=. scripts/run.jl --config config.toml
-```
+For every target the launcher writes a short Bash script into `$XDG_RUNTIME_DIR/ssh-autologin/`, a user-private directory (mode 0700) on an in-memory file system. The script removes itself as its first action, hands the password to `sshpass` through a pipe on file descriptor 3, and replaces itself with `sshpass -d 3 ssh ...`. In `tabs` mode Konsole is started once with `--tabs-from-file` pointing at a list with one script per tab; in `windows` mode Konsole is started once per target. The launcher then waits, at most `launch_settle_timeout` seconds, until every script has removed itself, deletes the tab list, and returns. If the emulator exits early or the wait times out, a warning reports the remaining files; they are purged at the next launch.
 
-### Dry Run Inspection
-To inspect constructed commands and environment variables without launching terminal windows:
-```bash
-julia --project=. scripts/run.jl --config config.toml --dry-run
-```
+With `hold = true` the script does not replace itself: it waits for the SSH session to end, prints the exit status, and waits for Enter before the tab closes. Because this is implemented in the script rather than with Konsole's `--hold`, it applies to every tab.
 
----
+## Security model
 
-## 5. Verification & Testing
+The password is read from `config.toml` into memory and written into the wrapper script, which lives on tmpfs with mode 0700 and unlinks itself when executed; under normal operation it exists for a fraction of a second. `sshpass -d` reads the password from a pipe, so it never appears in a process environment or an argument vector (`ps`, `/proc/*/cmdline`, `/proc/*/environ`). Nothing the package prints, logs, or returns from `show` contains a password, including `--dry-run` output.
 
-Activate and execute the test suite (comprising Aqua.jl static analysis, JET.jl type stability checks, ExplicitImports.jl linting, and full unit test coverage):
-```bash
-julia test/activate.jl
-julia --project=test test/runtests.jl
-```
+The threat model is a single-user workstation. A process running under the same account can read the wrapper during its short lifetime, and the package does not defend against a compromised account or a hostile administrator. Host-key verification follows the configured policy: `accept-new` (default) trusts a host on first contact and refuses a changed key, `yes` requires the key to be known already, and `no` disables verification. If `XDG_RUNTIME_DIR` is unset the scripts are written to a temporary directory on the regular file system and a warning is printed.
 
----
+Vulnerability reports: see [SECURITY.md](SECURITY.md).
 
-## 6. License
+## Limitations
 
-This project is licensed under the [MIT License](LICENSE).
+Linux only, and Konsole is the only supported emulator. Authentication is by password only; hosts that accept keys are better served by `ssh` with an agent, and key-based targets are a planned addition.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
