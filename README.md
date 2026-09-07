@@ -9,8 +9,7 @@ SshAutoLogin/
 ├── .github/
 │   ├── dependabot.yml         # Monthly updates of the GitHub Actions pins
 │   └── workflows/
-│       ├── CI.yml             # Test suite on Julia LTS, stable, and pre-release
-│       └── TagBot.yml         # Release tagging once the package is registered
+│       └── CI.yml             # Test suite on Julia LTS, stable, and pre-release
 ├── .gitignore                 # Credentials, manifests, editor artifacts
 ├── .JuliaFormatter.toml       # Formatting rules (YAS style)
 ├── CHANGELOG.md               # Release history
@@ -48,15 +47,23 @@ sudo dnf install konsole openssh-clients sshpass
 
 Julia 1.10 or newer.
 
-## Environment setup
+## Installation
+
+Clone the repository and use it in place; this is the intended way to run the command-line entry point:
 
 ```bash
+git clone https://github.com/PaulGoG/SshAutoLogin.jl.git
+cd SshAutoLogin.jl
 julia activate.jl          # root environment
 julia test/activate.jl     # test environment, developed against the local source
 julia format/activate.jl   # formatting environment
 ```
 
-Once the package is registered, `julia -e 'using Pkg; Pkg.add("SshAutoLogin")'` installs it into any environment.
+The package is not registered. To use the library API from another environment, add it by URL:
+
+```bash
+julia -e 'using Pkg; Pkg.add(url="https://github.com/PaulGoG/SshAutoLogin.jl")'
+```
 
 ## Usage
 
