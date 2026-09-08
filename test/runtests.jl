@@ -359,4 +359,16 @@ end
         @test occursin("sshpass, konsole",
                        sprint(showerror, MissingBinaryError(["sshpass", "konsole"])))
     end
+
+    @testset "Command-line interface (sandbox)" begin
+        # Exercises scripts/run.jl end to end against a stub emulator and throwaway
+        # configurations: no network, no real host, no real credential, no desktop session.
+        include(joinpath(dirname(@__DIR__), "sandbox", "run.jl"))
+        results = run_sandbox(; verbose=false)
+        @test !isempty(results)
+        for result in results
+            @test result.exitcode == result.expected
+            @test !result.leaked
+        end
+    end
 end

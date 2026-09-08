@@ -28,6 +28,8 @@ SshAutoLogin/
 │   ├── Project.toml           # Formatting environment (JuliaFormatter 2.14+)
 │   ├── activate.jl            # Activates the formatting environment
 │   └── format.jl              # Formats the repository; --check verifies without writing
+├── sandbox/
+│   └── run.jl                 # Exercises the CLI against a stub emulator, no network
 ├── scripts/
 │   └── run.jl                 # Command-line entry point
 ├── src/
@@ -101,6 +103,7 @@ cp config.example.toml config.toml
 | Use another configuration file | `julia scripts/run.jl --config path/to/config.toml` |
 | Print the emulator commands without launching | `julia scripts/run.jl --dry-run` |
 | Run the test suite | `julia --project=test test/runtests.jl` |
+| Exercise the CLI safely, no network | `julia sandbox/run.jl` |
 | Format the sources | `julia format/format.jl` |
 | Check formatting without writing | `julia format/format.jl --check` |
 
