@@ -1,6 +1,11 @@
 # SshAutoLogin.jl
 
-[![CI](https://github.com/PaulGoG/SshAutoLogin.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/PaulGoG/SshAutoLogin.jl/actions/workflows/CI.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/PaulGoG/SshAutoLogin.jl/CI.yml?branch=main&label=CI&logo=github)](https://github.com/PaulGoG/SshAutoLogin.jl/actions/workflows/CI.yml)
+[![Release](https://img.shields.io/github/v/release/PaulGoG/SshAutoLogin.jl?label=release)](https://github.com/PaulGoG/SshAutoLogin.jl/releases/latest)
+[![License](https://img.shields.io/github/license/PaulGoG/SshAutoLogin.jl)](LICENSE)
+[![Julia](https://img.shields.io/badge/Julia-1.10%2B-9558B2?logo=julia&logoColor=white)](https://julialang.org)
+[![Platform](https://img.shields.io/badge/platform-Linux-333333?logo=linux&logoColor=white)](#requirements)
+[![Aqua QA](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
 
 Opens one KDE Konsole tab, or one window, per remote host listed in a TOML file and logs in with password authentication, so that a set of compute nodes is reachable with a single command.
 
@@ -36,6 +41,23 @@ SshAutoLogin/
     ├── activate.jl            # Activates the test environment against the local source
     └── runtests.jl
 ```
+
+## How it works
+
+```mermaid
+flowchart LR
+    cfg["config.toml<br/>hosts, ports, passwords"]
+    wrap["one wrapper per host<br/>tmpfs, mode 0700, self-deleting"]
+    kon["Konsole<br/>single window"]
+    t1["tab 1, ssh session"]
+    tn["tab N, ssh session"]
+    cfg --> wrap
+    wrap --> kon
+    kon --> t1
+    kon --> tn
+```
+
+The password never reaches a command line or an environment. Each wrapper hands it to `sshpass` on file descriptor 3 and removes itself from the file system as its first action. [Security model](#security-model) has the details.
 
 ## Requirements
 
