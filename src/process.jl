@@ -140,9 +140,11 @@ function generate_tabs_file_content(targets::AbstractVector{SshTarget},
                                     wrapper_paths::AbstractVector{<:AbstractString})::String
     length(targets) == length(wrapper_paths) ||
         throw(DimensionMismatch("$(length(targets)) targets but $(length(wrapper_paths)) wrapper paths."))
-    lines = ["title: $(target.title) ;; command: $(path)"
-             for (target, path) in zip(targets, wrapper_paths)]
-    return join(lines, "\n") * "\n"
+    buffer = IOBuffer()
+    for (target, path) in zip(targets, wrapper_paths)
+        println(buffer, "title: ", target.title, " ;; command: ", path)
+    end
+    return String(take!(buffer))
 end
 
 """
