@@ -29,15 +29,16 @@ SshAutoLogin/
 │   ├── activate.jl            # Activates the formatting environment
 │   └── format.jl              # Formats the repository; --check verifies without writing
 ├── sandbox/
-│   └── run.jl                 # Exercises the CLI against a stub emulator, no network
+│   └── run.jl                 # Exercises the CLI in process against a stub emulator, no network
 ├── scripts/
-│   └── run.jl                 # Command-line entry point
+│   └── run.jl                 # Thin entry point around SshAutoLogin.main
 ├── src/
 │   ├── SshAutoLogin.jl        # Module and exports
 │   ├── validation.jl          # Field constraints and patterns
 │   ├── types.jl               # SshTarget, GlobalConfig, TerminalOptions, SessionConfig
 │   ├── config.jl              # TOML parsing with schema checks
-│   └── process.jl             # Wrapper scripts, emulator commands, launch logic
+│   ├── process.jl             # Wrapper scripts, emulator commands, launch logic
+│   └── cli.jl                 # Command-line driver: argument parsing, main
 └── test/
     ├── Project.toml           # Test environment (Aqua, JET, ExplicitImports)
     ├── activate.jl            # Activates the test environment against the local source
@@ -103,7 +104,7 @@ cp config.example.toml config.toml
 | Format the sources | `julia format/format.jl` |
 | Check formatting without writing | `julia format/format.jl --check` |
 
-The script activates its own environment, so `--project` is not needed.
+The script activates its own environment, so `--project` is not needed. It only calls `SshAutoLogin.main(args; io, err)`, which returns the exit status (0 on success, 1 on a usage, configuration, or missing-binary error) and writes the dry-run listing to `io` and the diagnostics to `err`.
 
 From Julia:
 
@@ -112,6 +113,7 @@ using SshAutoLogin
 config = load_config("config.toml")
 plan_sessions(config)      # emulator commands, no side effects
 launch_sessions(config)    # opens the sessions and returns the emulator processes
+SshAutoLogin.main(["--dry-run", "config.toml"])   # the command-line driver, in process
 ```
 
 ## Configuration

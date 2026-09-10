@@ -385,6 +385,35 @@ end
                        sprint(showerror, MissingBinaryError(["sshpass", "konsole"])))
     end
 
+    @testset "Command-line driver" begin
+        parse = SshAutoLogin.parse_arguments
+        @test parse(["--help"]).help
+        @test parse(["-d", "-h"]).help
+        options = parse(["--dry-run", "--config", "/cfg/x.toml"])
+        @test !options.help
+        @test options.dry_run
+        @test options.config_path == "/cfg/x.toml"
+        @test parse(["/cfg/positional.toml"]).config_path == "/cfg/positional.toml"
+        defaults = parse(String[]; default_config="/cfg/default.toml")
+        @test defaults.config_path == "/cfg/default.toml"
+        @test !defaults.dry_run
+        @test_throws ArgumentError parse(["--bogus"])
+        @test_throws ArgumentError parse(["--config"])
+        @test endswith(SshAutoLogin.default_config_path(), "config.toml")
+
+        # main returns the status instead of exiting and writes to the given streams
+        io = IOBuffer()
+        err = IOBuffer()
+        @test SshAutoLogin.main(["--help"]; io=io, err=err) == 0
+        @test occursin("Usage:", String(take!(io)))
+        @test isempty(take!(err))
+        @test SshAutoLogin.main(["/nonexistent/config.toml"]; io=io, err=err) == 1
+        @test isempty(take!(io))
+        @test occursin("configuration file not found", String(take!(err)))
+        @test SshAutoLogin.main(["--bogus"]; io=io, err=err) == 1
+        @test occursin("unrecognized option '--bogus'", String(take!(err)))
+    end
+
     @testset "Command-line interface (sandbox)" begin
         # Exercises scripts/run.jl end to end against a stub emulator and throwaway
         # configurations: no network, no real host, no real credential, no desktop session.

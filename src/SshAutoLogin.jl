@@ -1,11 +1,13 @@
 module SshAutoLogin
 
+using Logging: ConsoleLogger, with_logger
 using TOML: TOML
 
 include("validation.jl")
 include("types.jl")
 include("config.jl")
 include("process.jl")
+include("cli.jl")
 
 export SshTarget,
        GlobalConfig,

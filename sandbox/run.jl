@@ -12,8 +12,17 @@ directly:
 julia sandbox/run.jl
 ```
 
-The test suite includes this file and asserts the same expectations.
+The driver is called in process through `SshAutoLogin.main`; one scenario spawns
+`scripts/run.jl` in a separate Julia process to verify the script wrapper as well. The
+test suite includes this file and asserts the same expectations.
 """
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    using Pkg
+    Pkg.activate(dirname(@__DIR__); io=devnull)
+    Pkg.instantiate(; io=devnull)
+end
+using SshAutoLogin
 
 const REPOSITORY_ROOT = dirname(@__DIR__)
 const DRIVER = joinpath(REPOSITORY_ROOT, "scripts", "run.jl")
@@ -118,43 +127,53 @@ function with_sandbox(f)
 end
 
 """
-    invoke_driver(arguments)
+    invoke_driver(arguments; spawn = false)
 
-Run the driver script with `arguments`, capturing both streams.
+Run the driver with `arguments`, capturing both streams. The call is made in process
+through `SshAutoLogin.main`; with `spawn = true` a separate Julia process runs
+`scripts/run.jl` instead, which verifies the script wrapper itself.
 Returns `(; exitcode, output)`.
 """
-function invoke_driver(arguments::Vector{String})
+function invoke_driver(arguments::Vector{String}; spawn::Bool=false)
     buffer = IOBuffer()
-    command = `$(Base.julia_cmd()) --startup-file=no $(DRIVER) $(arguments)`
-    process = run(pipeline(ignorestatus(command); stdout=buffer, stderr=buffer))
-    return (; exitcode=process.exitcode, output=String(take!(buffer)))
+    exitcode = if spawn
+        command = `$(Base.julia_cmd()) --startup-file=no $(DRIVER) $(arguments)`
+        run(pipeline(ignorestatus(command); stdout=buffer, stderr=buffer)).exitcode
+    else
+        SshAutoLogin.main(arguments; io=buffer, err=buffer)
+    end
+    return (; exitcode, output=String(take!(buffer)))
 end
 
 """
     scenarios(configs)
 
 Build the scenario list: arguments, expected exit status, fragments the output must
-contain, and what each scenario demonstrates.
+contain, whether to spawn `scripts/run.jl` instead of calling `main` in process, and
+what each scenario demonstrates.
 """
 function scenarios(configs::AbstractDict)
     return [(; arguments=["--config", configs["tabs"], "--dry-run"], expected=0,
              fragments=["konsole --nofork --tabs-from-file", "<runtime-dir>/tabs.konsole"],
-             description="a dry run prints the emulator command"),
+             spawn=false, description="a dry run prints the emulator command"),
             (; arguments=["--config", configs["tabs"]], expected=0,
-             fragments=["Sessions dispatched", "emulator_processes = 1"],
+             fragments=["Sessions dispatched", "emulator_processes = 1"], spawn=false,
              description="tabs mode launches one window"),
             (; arguments=["--config", configs["windows"]], expected=0,
-             fragments=["Sessions dispatched", "emulator_processes = 2"],
+             fragments=["Sessions dispatched", "emulator_processes = 2"], spawn=false,
              description="windows mode launches one per target"),
             (; arguments=["--config", configs["malformed"]], expected=1,
-             fragments=["connect_timeoutt"],
+             fragments=["connect_timeoutt"], spawn=false,
              description="a misspelled key is refused"),
             (; arguments=["--config", configs["missing"]], expected=1,
-             fragments=["configuration file not found"],
+             fragments=["configuration file not found"], spawn=false,
              description="a missing file is reported"),
             (; arguments=["--bogus"], expected=1,
-             fragments=["unrecognized option '--bogus'"],
-             description="an unknown option is rejected")]
+             fragments=["unrecognized option '--bogus'"], spawn=false,
+             description="an unknown option is rejected"),
+            (; arguments=["--config", configs["tabs"]], expected=0,
+             fragments=["Sessions dispatched", "emulator_processes = 1"], spawn=true,
+             description="scripts/run.jl forwards the arguments and the exit status")]
 end
 
 """
@@ -169,7 +188,7 @@ function run_sandbox(; io::IO=stdout, verbose::Bool=true)
     return with_sandbox() do configs
         results = NamedTuple[]
         for scenario in scenarios(configs)
-            outcome = invoke_driver(scenario.arguments)
+            outcome = invoke_driver(scenario.arguments; spawn=scenario.spawn)
             leaked = occursin(SANDBOX_PASSWORD, outcome.output)
             missing_fragments = [fragment
                                  for fragment in scenario.fragments

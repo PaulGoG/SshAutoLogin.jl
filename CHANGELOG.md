@@ -12,6 +12,8 @@ All notable changes to SshAutoLogin.jl are recorded in this file. The format fol
 
 - `emulator` and `log_level` must match the documented spelling exactly; the emulator name is also the executable looked up in `PATH`, so a differently cased value could pass validation and then fail at launch.
 - The sandbox asserts the content of the driver output, not only the exit status.
+- The command-line driver moved from `scripts/run.jl` into the package as `SshAutoLogin.main(args; io, err)`, which returns the exit status instead of calling `exit` and takes its output streams as arguments; the script is a thin wrapper. The sandbox and the test suite call the driver in process, so the suite no longer spawns one Julia process per scenario.
+- The test environment consumes the package through a relative `[sources]` entry, which Julia 1.11 and later read directly; `test/activate.jl` still develops the package on Julia 1.10.
 - The README no longer suggests `Pkg.add(url=...)`; the package is meant to be run from the clone.
 
 ## [0.1.0] - 2026-09-08
