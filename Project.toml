@@ -1,7 +1,7 @@
 name = "SshAutoLogin"
 uuid = "69c3f65a-e256-448a-b8da-79da2ff01621"
 authors = ["Paul-Adrian Gogîță <gogitapaul@yahoo.ro>"]
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 
 [deps]

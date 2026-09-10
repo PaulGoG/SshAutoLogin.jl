@@ -4,6 +4,8 @@ All notable changes to SshAutoLogin.jl are recorded in this file. The format fol
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-10
+
 ### Fixed
 
 - Booleans are rejected for the numeric keys `port`, `connect_timeout`, and `launch_settle_timeout`; previously `port = true` was accepted as port 1.
@@ -28,5 +30,6 @@ All notable changes to SshAutoLogin.jl are recorded in this file. The format fol
 - Command-line entry point `scripts/run.jl` with `--config` and `--dry-run`.
 - Test suite with Aqua, JET, ExplicitImports, and launch tests against a stub emulator; formatting enforced by a dedicated `format/` environment and CI job.
 
-[Unreleased]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/PaulGoG/SshAutoLogin.jl/releases/tag/v0.1.0
