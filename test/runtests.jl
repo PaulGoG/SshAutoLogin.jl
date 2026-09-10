@@ -369,6 +369,7 @@ end
         for result in results
             @test result.exitcode == result.expected
             @test !result.leaked
+            @test isempty(result.missing_fragments)
         end
     end
 end

@@ -133,36 +133,59 @@ end
 """
     scenarios(configs)
 
-Build the scenario list: arguments, expected exit status, and what each demonstrates.
+Build the scenario list: arguments, expected exit status, fragments the output must
+contain, and what each scenario demonstrates.
 """
 function scenarios(configs::AbstractDict)
-    return [(["--config", configs["tabs"], "--dry-run"], 0,
-             "a dry run prints the emulator command"),
-            (["--config", configs["tabs"]], 0, "tabs mode launches one window"),
-            (["--config", configs["windows"]], 0, "windows mode launches one per target"),
-            (["--config", configs["malformed"]], 1, "a misspelled key is refused"),
-            (["--config", configs["missing"]], 1, "a missing file is reported"),
-            (["--bogus"], 1, "an unknown option is rejected")]
+    return [(; arguments=["--config", configs["tabs"], "--dry-run"], expected=0,
+             fragments=["konsole --nofork --tabs-from-file", "<runtime-dir>/tabs.konsole"],
+             description="a dry run prints the emulator command"),
+            (; arguments=["--config", configs["tabs"]], expected=0,
+             fragments=["Sessions dispatched", "emulator_processes = 1"],
+             description="tabs mode launches one window"),
+            (; arguments=["--config", configs["windows"]], expected=0,
+             fragments=["Sessions dispatched", "emulator_processes = 2"],
+             description="windows mode launches one per target"),
+            (; arguments=["--config", configs["malformed"]], expected=1,
+             fragments=["connect_timeoutt"],
+             description="a misspelled key is refused"),
+            (; arguments=["--config", configs["missing"]], expected=1,
+             fragments=["configuration file not found"],
+             description="a missing file is reported"),
+            (; arguments=["--bogus"], expected=1,
+             fragments=["unrecognized option '--bogus'"],
+             description="an unknown option is rejected")]
 end
 
 """
     run_sandbox(; io = stdout, verbose = true)
 
-Run every scenario and return a vector of `(; description, expected, exitcode, leaked)`.
-`leaked` reports whether the sandbox password appeared in the output, which must never
-happen.
+Run every scenario and return a vector of
+`(; description, expected, exitcode, leaked, missing_fragments)`. `leaked` reports
+whether the sandbox password appeared in the output, which must never happen;
+`missing_fragments` lists the expected output fragments that did not appear.
 """
 function run_sandbox(; io::IO=stdout, verbose::Bool=true)
     return with_sandbox() do configs
         results = NamedTuple[]
-        for (arguments, expected, description) in scenarios(configs)
-            outcome = invoke_driver(arguments)
+        for scenario in scenarios(configs)
+            outcome = invoke_driver(scenario.arguments)
             leaked = occursin(SANDBOX_PASSWORD, outcome.output)
-            push!(results, (; description, expected, exitcode=outcome.exitcode, leaked))
+            missing_fragments = [fragment
+                                 for fragment in scenario.fragments
+                                 if !occursin(fragment, outcome.output)]
+            push!(results,
+                  (; scenario.description, scenario.expected, exitcode=outcome.exitcode,
+                   leaked, missing_fragments))
             if verbose
-                status = (outcome.exitcode == expected && !leaked) ? "ok" : "UNEXPECTED"
-                println(io, rpad("[$(status)]", 14), "exit ", outcome.exitcode,
-                        " (expected ", expected, ")   ", description)
+                ok = outcome.exitcode == scenario.expected && !leaked &&
+                     isempty(missing_fragments)
+                println(io, rpad(ok ? "[ok]" : "[UNEXPECTED]", 14), "exit ",
+                        outcome.exitcode, " (expected ", scenario.expected, ")   ",
+                        scenario.description)
+                for fragment in missing_fragments
+                    println(io, " "^14, "missing from the output: ", fragment)
+                end
             end
         end
         return results
@@ -172,7 +195,8 @@ end
 if abspath(PROGRAM_FILE) == @__FILE__
     println("Running the command-line sandbox: stub emulator, throwaway configuration, no network.\n")
     results = run_sandbox()
-    failures = count(r -> r.exitcode != r.expected || r.leaked, results)
+    failures = count(r -> r.exitcode != r.expected || r.leaked ||
+                          !isempty(r.missing_fragments), results)
     println("\n", length(results) - failures, " of ", length(results),
             " scenarios behaved as expected.")
     any(r -> r.leaked, results) && println("A credential leaked into the output.")

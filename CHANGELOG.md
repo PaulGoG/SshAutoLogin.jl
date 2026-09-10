@@ -4,6 +4,10 @@ All notable changes to SshAutoLogin.jl are recorded in this file. The format fol
 
 ## [Unreleased]
 
+### Changed
+
+- The sandbox asserts the content of the driver output, not only the exit status.
+
 ## [0.1.0] - 2026-09-08
 
 ### Added
