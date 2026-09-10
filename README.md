@@ -50,7 +50,7 @@ SshAutoLogin/
 flowchart LR
     cfg["config.toml<br/>hosts, ports, passwords"]
     wrap["one wrapper per host<br/>tmpfs, mode 0700, self-deleting"]
-    kon["Konsole<br/>single window"]
+    kon["Konsole<br/>one window with tabs,<br/>or one window per host"]
     t1["tab 1, ssh session"]
     tn["tab N, ssh session"]
     cfg --> wrap
