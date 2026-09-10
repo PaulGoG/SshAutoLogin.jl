@@ -4,8 +4,13 @@ All notable changes to SshAutoLogin.jl are recorded in this file. The format fol
 
 ## [Unreleased]
 
+### Fixed
+
+- Booleans are rejected for the numeric keys `port`, `connect_timeout`, and `launch_settle_timeout`; previously `port = true` was accepted as port 1.
+
 ### Changed
 
+- `emulator` and `log_level` must match the documented spelling exactly; the emulator name is also the executable looked up in `PATH`, so a differently cased value could pass validation and then fail at launch.
 - The sandbox asserts the content of the driver output, not only the exit status.
 
 ## [0.1.0] - 2026-09-08

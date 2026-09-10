@@ -80,7 +80,8 @@ end
 """
     validate_global_fields(connect_timeout, host_key_policy, log_level)
 
-Validate the fields of a [`GlobalConfig`](@ref). Throws `ArgumentError` naming the
+Validate the fields of a [`GlobalConfig`](@ref). Enumerated values must match exactly,
+in the spelling documented in `config.example.toml`. Throws `ArgumentError` naming the
 offending field.
 """
 function validate_global_fields(connect_timeout::Integer, host_key_policy::AbstractString,
@@ -91,7 +92,7 @@ function validate_global_fields(connect_timeout::Integer, host_key_policy::Abstr
     if !(host_key_policy in VALID_HOST_KEY_POLICIES)
         throw(ArgumentError("Global 'strict_host_key_checking' ($(repr(host_key_policy))) must be one of $(VALID_HOST_KEY_POLICIES)."))
     end
-    if !(uppercase(log_level) in VALID_LOG_LEVELS)
+    if !(log_level in VALID_LOG_LEVELS)
         throw(ArgumentError("Global 'log_level' ($(repr(log_level))) must be one of $(VALID_LOG_LEVELS)."))
     end
     return nothing
@@ -100,12 +101,13 @@ end
 """
     validate_terminal_fields(emulator, mode, launch_settle_timeout)
 
-Validate the fields of a [`TerminalOptions`](@ref). Throws `ArgumentError` naming the
+Validate the fields of a [`TerminalOptions`](@ref). The emulator name must match exactly,
+because it is also the executable looked up in `PATH`. Throws `ArgumentError` naming the
 offending field.
 """
 function validate_terminal_fields(emulator::AbstractString, mode::Symbol,
                                   launch_settle_timeout::Real)
-    if !(lowercase(emulator) in VALID_TERMINAL_EMULATORS)
+    if !(emulator in VALID_TERMINAL_EMULATORS)
         throw(ArgumentError("Terminal 'emulator' ($(repr(emulator))) is not supported; supported emulators: $(VALID_TERMINAL_EMULATORS)."))
     end
     if !(mode in VALID_TERMINAL_MODES)

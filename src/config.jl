@@ -22,13 +22,16 @@ end
     typed_value(table::AbstractDict, key::AbstractString, ::Type{T}, default, context) where {T}
 
 Return `table[key]` if present, otherwise `default`, checking that the value is a `T`.
-Throws `ArgumentError` naming `context.key` on a type mismatch.
+A boolean is never accepted for a numeric `T`, although `Bool <: Integer` in Julia, so
+that `port = true` cannot silently become port 1. Throws `ArgumentError` naming
+`context.key` on a type mismatch.
 """
 function typed_value(table::AbstractDict, key::AbstractString, ::Type{T}, default,
                      context::AbstractString) where {T}
     value = get(table, key, default)
-    if !(value isa T)
-        throw(ArgumentError("Configuration key '$(context).$(key)' must be of type $(T); received $(typeof(value))."))
+    if !(value isa T) || (value isa Bool && T !== Bool)
+        location = isempty(context) ? key : "$(context).$(key)"
+        throw(ArgumentError("Configuration key '$(location)' must be of type $(T); received $(typeof(value))."))
     end
     return value
 end

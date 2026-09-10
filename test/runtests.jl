@@ -109,7 +109,9 @@ end
         @test_throws ArgumentError GlobalConfig(0, "accept-new", "ERROR")
         @test_throws ArgumentError GlobalConfig(10, "invalid_policy", "ERROR")
         @test_throws ArgumentError GlobalConfig(10, "accept-new", "UNKNOWN")
+        @test_throws ArgumentError GlobalConfig(10, "accept-new", "error")
         @test_throws ArgumentError TerminalOptions("xterm", :tabs, false)
+        @test_throws ArgumentError TerminalOptions("Konsole", :tabs, false)
         @test_throws ArgumentError TerminalOptions("konsole", :panes, false)
         @test_throws ArgumentError TerminalOptions("konsole", :tabs, false, 0)
         @test_throws ArgumentError TerminalOptions("konsole", :tabs, false, Inf)
@@ -208,6 +210,29 @@ end
                                                      Any}("targets" => Any[wrong_type])))
         @test err isa ArgumentError
         @test occursin("port", sprint(showerror, err))
+
+        # Booleans are integers in Julia but never acceptable for numeric keys
+        boolean_port = merge(base_target, Dict{String, Any}("port" => true))
+        err = captured_error(() -> parse_config(Dict{String,
+                                                     Any}("targets" => Any[boolean_port])))
+        @test err isa ArgumentError
+        @test occursin("'[[targets]] #1.port' must be of type Integer",
+                       sprint(showerror, err))
+        for (section, key) in (("globals", "connect_timeout"),
+                               ("terminal", "launch_settle_timeout"))
+            err = captured_error(() -> parse_config(Dict{String,
+                                                         Any}(section => Dict{String,
+                                                                              Any}(key => true),
+                                                              "targets" =>
+                                                                  Any[base_target])))
+            @test err isa ArgumentError
+            @test occursin("'[$(section)].$(key)'", sprint(showerror, err))
+        end
+        err = captured_error(() -> parse_config(Dict{String, Any}("globals" => 1,
+                                                                  "targets" =>
+                                                                      Any[base_target])))
+        @test err isa ArgumentError
+        @test occursin("'globals' must be of type", sprint(showerror, err))
 
         @test_throws ArgumentError parse_config(Dict{String,
                                                      Any}("terminal" => Dict{String,
