@@ -83,11 +83,7 @@ julia test/activate.jl     # test environment, developed against the local sourc
 julia format/activate.jl   # formatting environment
 ```
 
-The package is not registered. To use the library API from another environment, add it by URL:
-
-```bash
-julia -e 'using Pkg; Pkg.add(url="https://github.com/PaulGoG/SshAutoLogin.jl")'
-```
+The package is not registered and is meant to be run from the clone.
 
 ## Usage
 

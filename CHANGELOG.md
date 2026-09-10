@@ -12,6 +12,7 @@ All notable changes to SshAutoLogin.jl are recorded in this file. The format fol
 
 - `emulator` and `log_level` must match the documented spelling exactly; the emulator name is also the executable looked up in `PATH`, so a differently cased value could pass validation and then fail at launch.
 - The sandbox asserts the content of the driver output, not only the exit status.
+- The README no longer suggests `Pkg.add(url=...)`; the package is meant to be run from the clone.
 
 ## [0.1.0] - 2026-09-08
 
