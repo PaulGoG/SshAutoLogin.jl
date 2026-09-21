@@ -8,7 +8,7 @@ connect_timeout = 10  # integer > 0; units: s
 strict_host_key_checking = "accept-new"  # one of: "accept-new" | "yes" | "no"
 
 # OpenSSH LogLevel
-log_level = "ERROR"  # one of: "QUIET" | "FATAL" | "ERROR" | "INFO" | "VERBOSE" | "DEBUG"
+log_level = "ERROR"  # one of: "QUIET" | "FATAL" | "ERROR" | "INFO" | "VERBOSE" | "DEBUG" | "DEBUG1" | "DEBUG2" | "DEBUG3"
 
 [terminal]
 # Terminal emulator executable

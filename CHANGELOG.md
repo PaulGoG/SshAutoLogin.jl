@@ -4,6 +4,17 @@ All notable changes to SshAutoLogin.jl are recorded in this file. The format fol
 
 ## [Unreleased]
 
+### Added
+
+- `CITATION.cff` and a citation section in the README.
+
+### Changed
+
+- `scripts/run.jl`, `sandbox/run.jl`, and `test/runtests.jl` activate their environment through the `activate.jl` of that environment, so the test suite runs as `julia test/runtests.jl` without `--project`.
+- The README opens with a short file tree, the environment setup, the entry points, and the component status; the full tree moved into a collapsed section.
+- Dependabot runs weekly and also watches the formatting environment.
+- The `log_level` comment of `config.example.toml` lists every accepted value, including `DEBUG1` to `DEBUG3`.
+
 ### Fixed
 
 - `Pkg.test()` passes. The sandbox scenario that spawns `scripts/run.jl` inherited the load path that `Pkg.test` exports, which lacks the standard libraries, so the child could not load `Pkg` and the scenario failed; the spawned driver now starts without `JULIA_LOAD_PATH` and `JULIA_PROJECT`. Running the suite as a script was not affected.

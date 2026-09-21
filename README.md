@@ -4,46 +4,89 @@
 [![Release](https://img.shields.io/github/v/release/PaulGoG/SshAutoLogin.jl?label=release)](https://github.com/PaulGoG/SshAutoLogin.jl/releases/latest)
 [![License](https://img.shields.io/github/license/PaulGoG/SshAutoLogin.jl)](LICENSE)
 [![Julia](https://img.shields.io/badge/Julia-1.10%2B-9558B2?logo=julia&logoColor=white)](https://julialang.org)
-[![Platform](https://img.shields.io/badge/platform-Linux-333333?logo=linux&logoColor=white)](#requirements)
+[![Platform](https://img.shields.io/badge/platform-Linux-333333?logo=linux&logoColor=white)](#environment-setup)
 [![Aqua QA](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
 
 Opens one KDE Konsole tab, or one window, per remote host listed in a TOML file and logs in with password authentication, so that a set of compute nodes is reachable with a single command.
 
 ```
 SshAutoLogin/
-├── .github/
-│   ├── dependabot.yml         # Monthly updates of the GitHub Actions pins
-│   └── workflows/
-│       └── CI.yml             # Test suite on Julia LTS, stable, and pre-release
-├── .gitignore                 # Credentials, manifests, editor artifacts
-├── .JuliaFormatter.toml       # Formatting rules (YAS style)
-├── CHANGELOG.md               # Release history
-├── LICENSE                    # MIT
-├── Project.toml               # Package metadata and compat bounds
-├── README.md
-├── SECURITY.md                # Threat model and vulnerability reporting
-├── activate.jl                # Activates and instantiates the root environment
-├── config.example.toml        # Configuration template
-├── format/
-│   ├── Project.toml           # Formatting environment (JuliaFormatter 2.14+)
-│   ├── activate.jl            # Activates the formatting environment
-│   └── format.jl              # Formats the repository; --check verifies without writing
-├── sandbox/
-│   └── run.jl                 # Exercises the CLI in process against a stub emulator, no network
-├── scripts/
-│   └── run.jl                 # Thin entry point around SshAutoLogin.main
-├── src/
-│   ├── SshAutoLogin.jl        # Module and exports
-│   ├── validation.jl          # Field constraints and patterns
-│   ├── types.jl               # SshTarget, GlobalConfig, TerminalOptions, SessionConfig
-│   ├── config.jl              # TOML parsing with schema checks
-│   ├── process.jl             # Wrapper scripts, emulator commands, launch logic
-│   └── cli.jl                 # Command-line driver: argument parsing, main
-└── test/
-    ├── Project.toml           # Test environment (Aqua, JET, ExplicitImports)
-    ├── activate.jl            # Activates the test environment against the local source
-    └── runtests.jl
+├── src/                   # Package: configuration parser, wrapper scripts, launcher, CLI driver
+├── scripts/run.jl         # Command-line entry point
+├── sandbox/run.jl         # CLI exercised against a stub emulator, no network
+├── test/                  # Test suite and its environment
+├── format/                # Formatting environment and script
+├── config.example.toml    # Configuration template
+├── activate.jl            # Activates and instantiates the root environment
+├── Project.toml
+├── CHANGELOG.md
+├── CITATION.cff
+└── SECURITY.md
 ```
+
+The complete tree is under [Repository layout](#repository-layout).
+
+## Environment setup
+
+Linux with a systemd user session. Fedora with KDE Plasma is the development platform; any distribution that ships Konsole works. The launcher needs Konsole, the OpenSSH client, and `sshpass` 1.06 or newer:
+
+```bash
+sudo dnf install konsole openssh-clients sshpass
+```
+
+Julia 1.10 or newer.
+
+Clone the repository and use it in place; this is the intended way to run the command-line entry point:
+
+```bash
+git clone https://github.com/PaulGoG/SshAutoLogin.jl.git
+cd SshAutoLogin.jl
+julia activate.jl          # root environment
+julia test/activate.jl     # test environment, developed against the local source
+julia format/activate.jl   # formatting environment
+```
+
+The package is not registered and is meant to be run from the clone.
+
+## Entry points
+
+Copy the template and fill in the targets. `config.toml` is ignored by git.
+
+```bash
+cp config.example.toml config.toml
+```
+
+| Task | Command |
+|---|---|
+| Open all sessions | `julia scripts/run.jl` |
+| Use another configuration file | `julia scripts/run.jl --config path/to/config.toml` |
+| Print the emulator commands without launching | `julia scripts/run.jl --dry-run` |
+| Run the test suite | `julia test/runtests.jl` |
+| Exercise the CLI safely, no network | `julia sandbox/run.jl` |
+| Format the sources | `julia format/format.jl` |
+| Check formatting without writing | `julia format/format.jl --check` |
+
+Every script activates its own environment, so `--project` is never needed. It only calls `SshAutoLogin.main(args; io, err)`, which returns the exit status (0 on success, 1 on a usage, configuration, or missing-binary error) and writes the dry-run listing to `io` and the diagnostics to `err`.
+
+From Julia:
+
+```julia
+using SshAutoLogin
+config = load_config("config.toml")
+plan_sessions(config)      # emulator commands, no side effects
+launch_sessions(config)    # opens the sessions and returns the emulator processes
+SshAutoLogin.main(["--dry-run", "config.toml"])   # the command-line driver, in process
+```
+
+## Component status
+
+| Component | Status |
+|---|---|
+| TOML configuration parser and field validation | Stable |
+| Konsole `tabs` and `windows` layouts, `hold` option | Stable; covered by launch tests against a stub emulator |
+| Credential delivery to `sshpass` over a file descriptor | Stable; redaction asserted by the test suite and the sandbox |
+| Terminal emulators other than Konsole | Not implemented |
+| Key-based authentication | Not implemented; planned |
 
 ## How it works
 
@@ -61,60 +104,6 @@ flowchart LR
 ```
 
 The password never reaches a command line or an environment. Each wrapper hands it to `sshpass` on file descriptor 3 and removes itself from the file system as its first action. [Security model](#security-model) has the details.
-
-## Requirements
-
-Linux with a systemd user session. Fedora with KDE Plasma is the development platform; any distribution that ships Konsole works. The launcher needs Konsole, the OpenSSH client, and `sshpass` 1.06 or newer:
-
-```bash
-sudo dnf install konsole openssh-clients sshpass
-```
-
-Julia 1.10 or newer.
-
-## Installation
-
-Clone the repository and use it in place; this is the intended way to run the command-line entry point:
-
-```bash
-git clone https://github.com/PaulGoG/SshAutoLogin.jl.git
-cd SshAutoLogin.jl
-julia activate.jl          # root environment
-julia test/activate.jl     # test environment, developed against the local source
-julia format/activate.jl   # formatting environment
-```
-
-The package is not registered and is meant to be run from the clone.
-
-## Usage
-
-Copy the template and fill in the targets. `config.toml` is ignored by git.
-
-```bash
-cp config.example.toml config.toml
-```
-
-| Task | Command |
-|---|---|
-| Open all sessions | `julia scripts/run.jl` |
-| Use another configuration file | `julia scripts/run.jl --config path/to/config.toml` |
-| Print the emulator commands without launching | `julia scripts/run.jl --dry-run` |
-| Run the test suite | `julia --project=test test/runtests.jl` |
-| Exercise the CLI safely, no network | `julia sandbox/run.jl` |
-| Format the sources | `julia format/format.jl` |
-| Check formatting without writing | `julia format/format.jl --check` |
-
-The script activates its own environment, so `--project` is not needed. It only calls `SshAutoLogin.main(args; io, err)`, which returns the exit status (0 on success, 1 on a usage, configuration, or missing-binary error) and writes the dry-run listing to `io` and the diagnostics to `err`.
-
-From Julia:
-
-```julia
-using SshAutoLogin
-config = load_config("config.toml")
-plan_sessions(config)      # emulator commands, no side effects
-launch_sessions(config)    # opens the sessions and returns the emulator processes
-SshAutoLogin.main(["--dry-run", "config.toml"])   # the command-line driver, in process
-```
 
 ## Configuration
 
@@ -158,6 +147,64 @@ Vulnerability reports: see [SECURITY.md](SECURITY.md).
 ## Limitations
 
 Linux only, and Konsole is the only supported emulator. Authentication is by password only; hosts that accept keys are better served by `ssh` with an agent, and key-based targets are a planned addition.
+
+## How to cite
+
+Citation metadata is in [CITATION.cff](CITATION.cff). BibTeX:
+
+```bibtex
+@software{Gogita_SshAutoLogin_2026,
+  author  = {Gogîță, Paul-Adrian},
+  title   = {{SshAutoLogin.jl}},
+  year    = {2026},
+  version = {0.2.0},
+  url     = {https://github.com/PaulGoG/SshAutoLogin.jl}
+}
+```
+
+## Repository layout
+
+<details>
+<summary>Full file tree</summary>
+
+```
+SshAutoLogin/
+├── .github/
+│   ├── dependabot.yml         # Weekly updates of the GitHub Actions pins and the formatting environment
+│   └── workflows/
+│       └── CI.yml             # Test suite on Julia LTS, stable, and pre-release
+├── .gitignore                 # Credentials, manifests, editor artifacts
+├── .JuliaFormatter.toml       # Formatting rules (YAS style)
+├── CHANGELOG.md               # Release history
+├── CITATION.cff               # Citation metadata
+├── LICENSE                    # MIT
+├── Project.toml               # Package metadata and compat bounds
+├── README.md
+├── SECURITY.md                # Threat model and vulnerability reporting
+├── activate.jl                # Activates and instantiates the root environment
+├── config.example.toml        # Configuration template
+├── format/
+│   ├── Project.toml           # Formatting environment (JuliaFormatter 2.14+)
+│   ├── activate.jl            # Activates the formatting environment
+│   └── format.jl              # Formats the repository; --check verifies without writing
+├── sandbox/
+│   └── run.jl                 # Exercises the CLI in process against a stub emulator, no network
+├── scripts/
+│   └── run.jl                 # Thin entry point around SshAutoLogin.main
+├── src/
+│   ├── SshAutoLogin.jl        # Module and exports
+│   ├── validation.jl          # Field constraints and patterns
+│   ├── types.jl               # SshTarget, GlobalConfig, TerminalOptions, SessionConfig
+│   ├── config.jl              # TOML parsing with schema checks
+│   ├── process.jl             # Wrapper scripts, emulator commands, launch logic
+│   └── cli.jl                 # Command-line driver: argument parsing, main
+└── test/
+    ├── Project.toml           # Test environment (Aqua, JET, ExplicitImports)
+    ├── activate.jl            # Activates the test environment against the local source
+    └── runtests.jl
+```
+
+</details>
 
 ## License
 

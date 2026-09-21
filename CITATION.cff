@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "SshAutoLogin.jl"
+abstract: "Opens one KDE Konsole tab or window per remote host listed in a TOML file and logs in with password authentication delivered to sshpass over a file descriptor."
+authors:
+  - family-names: "Gogîță"
+    given-names: "Paul-Adrian"
+repository-code: "https://github.com/PaulGoG/SshAutoLogin.jl"
+license: MIT
+version: 0.2.0
+date-released: 2026-09-10
