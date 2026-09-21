@@ -137,7 +137,10 @@ Returns `(; exitcode, output)`.
 function invoke_driver(arguments::Vector{String}; spawn::Bool=false)
     buffer = IOBuffer()
     exitcode = if spawn
-        command = `$(Base.julia_cmd()) --startup-file=no $(DRIVER) $(arguments)`
+        # Pkg.test exports a load path without the standard libraries; the driver
+        # activates its own environment and must not inherit it.
+        command = addenv(`$(Base.julia_cmd()) --startup-file=no $(DRIVER) $(arguments)`,
+                         "JULIA_LOAD_PATH" => nothing, "JULIA_PROJECT" => nothing)
         run(pipeline(ignorestatus(command); stdout=buffer, stderr=buffer)).exitcode
     else
         SshAutoLogin.main(arguments; io=buffer, err=buffer)
