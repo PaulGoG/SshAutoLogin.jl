@@ -4,10 +4,6 @@ All notable changes to SshAutoLogin.jl are recorded in this file. The format fol
 
 ## [Unreleased]
 
-### Added
-
-- `CITATION.cff` and a citation section in the README.
-
 ### Changed
 
 - `scripts/run.jl`, `sandbox/run.jl`, and `test/runtests.jl` activate their environment through the `activate.jl` of that environment, so the test suite runs as `julia test/runtests.jl` without `--project`.

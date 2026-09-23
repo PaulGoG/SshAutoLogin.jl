@@ -20,7 +20,6 @@ SshAutoLogin/
 ├── activate.jl            # Activates and instantiates the root environment
 ├── Project.toml
 ├── CHANGELOG.md
-├── CITATION.cff
 └── SECURITY.md
 ```
 
@@ -148,20 +147,6 @@ Vulnerability reports: see [SECURITY.md](SECURITY.md).
 
 Linux only, and Konsole is the only supported emulator. Authentication is by password only; hosts that accept keys are better served by `ssh` with an agent, and key-based targets are a planned addition.
 
-## How to cite
-
-Citation metadata is in [CITATION.cff](CITATION.cff). BibTeX:
-
-```bibtex
-@software{Gogita_SshAutoLogin_2026,
-  author  = {Gogîță, Paul-Adrian},
-  title   = {{SshAutoLogin.jl}},
-  year    = {2026},
-  version = {0.2.0},
-  url     = {https://github.com/PaulGoG/SshAutoLogin.jl}
-}
-```
-
 ## Repository layout
 
 <details>
@@ -176,7 +161,6 @@ SshAutoLogin/
 ├── .gitignore                 # Credentials, manifests, editor artifacts
 ├── .JuliaFormatter.toml       # Formatting rules (YAS style)
 ├── CHANGELOG.md               # Release history
-├── CITATION.cff               # Citation metadata
 ├── LICENSE                    # MIT
 ├── Project.toml               # Package metadata and compat bounds
 ├── README.md
@@ -186,7 +170,7 @@ SshAutoLogin/
 ├── format/
 │   ├── Project.toml           # Formatting environment (JuliaFormatter 2.14+)
 │   ├── activate.jl            # Activates the formatting environment
-│   └── format.jl              # Formats the repository; --check verifies without writing
+│   └── format.jl              # Formats the repository; --check verifies without writing; refuses files that do not parse
 ├── sandbox/
 │   └── run.jl                 # Exercises the CLI in process against a stub emulator, no network
 ├── scripts/
