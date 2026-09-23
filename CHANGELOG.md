@@ -4,6 +4,8 @@ All notable changes to SshAutoLogin.jl are recorded in this file. The format fol
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-23
+
 ### Changed
 
 - `scripts/run.jl`, `sandbox/run.jl`, and `test/runtests.jl` activate their environment through the `activate.jl` of that environment, so the test suite runs as `julia test/runtests.jl` without `--project`.
@@ -42,6 +44,7 @@ All notable changes to SshAutoLogin.jl are recorded in this file. The format fol
 - Command-line entry point `scripts/run.jl` with `--config` and `--dry-run`.
 - Test suite with Aqua, JET, ExplicitImports, and launch tests against a stub emulator; formatting enforced by a dedicated `format/` environment and CI job.
 
-[Unreleased]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/PaulGoG/SshAutoLogin.jl/releases/tag/v0.1.0
