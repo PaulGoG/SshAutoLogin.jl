@@ -1,20 +1,16 @@
 #!/usr/bin/env julia
 
 """
-Exercise the command-line interface against a stub terminal emulator and throwaway
-configurations.
-
-Nothing here touches the network, a real host, a real credential, or your desktop session,
-so the sandbox is a safe way to confirm that the tool still behaves after a change. Run it
-directly:
+Runs the command-line driver against a stub terminal emulator and throwaway
+configurations, without network access or a desktop session:
 
 ```bash
 julia sandbox/run.jl
 ```
 
-The driver is called in process through `SshAutoLogin.main`; one scenario spawns
-`scripts/run.jl` in a separate Julia process to verify the script wrapper as well. The
-test suite includes this file and asserts the same expectations.
+Most scenarios call `SshAutoLogin.main` in process; one spawns `scripts/run.jl` to cover
+the script itself. `test/runtests.jl` includes this file and asserts the same
+expectations.
 """
 
 if abspath(PROGRAM_FILE) == @__FILE__
@@ -31,16 +27,16 @@ const SANDBOX_PASSWORD = "sandbox-password-never-printed"
 # Stands in for ssh and sshpass; the wrapper scripts execute it and it exits at once.
 const STUB_EXECUTABLE = "#!/bin/sh\nexit 0\n"
 
-# Stands in for Konsole. It waits briefly, then executes each wrapper exactly as Konsole
-# would, so that the self-deleting wrappers and the settle logic are genuinely exercised.
+# Stands in for Konsole: waits briefly, then runs each wrapper as Konsole does, so the
+# self-deletion and the settle wait are exercised.
 const STUB_KONSOLE = raw"""
 #!/bin/sh
 sleep 0.2
-if [ "$1" = "--nofork" ] && [ "$2" = "--tabs-from-file" ]; then
+if [ "$1" = "--separate" ] && [ "$2" = "--tabs-from-file" ]; then
     sed -n 's/.*;; command: //p' "$3" | while read -r wrapper; do
         "$wrapper" </dev/null >/dev/null 2>&1
     done
-elif [ "$1" = "--separate" ]; then
+elif [ "$1" = "--separate" ] && [ "$2" = "-p" ]; then
     "$5" </dev/null >/dev/null 2>&1
 fi
 exit 0
@@ -113,6 +109,7 @@ function with_sandbox(f)
                             "malformed" => MALFORMED_CONFIG)
             path = joinpath(dir, "config_$(key).toml")
             write(path, text)
+            chmod(path, 0o600)
             configs[key] = path
         end
         configs["missing"] = joinpath(dir, "does_not_exist.toml")
@@ -155,7 +152,8 @@ what each scenario demonstrates.
 """
 function scenarios(configs::AbstractDict)
     return [(; arguments=["--config", configs["tabs"], "--dry-run"], expected=0,
-             fragments=["konsole --nofork --tabs-from-file", "<runtime-dir>/tabs.konsole"],
+             fragments=["konsole --separate --tabs-from-file",
+                        "<runtime-dir>/tabs.konsole"],
              spawn=false, description="a dry run prints the emulator command"),
             (; arguments=["--config", configs["tabs"]], expected=0,
              fragments=["Sessions dispatched", "emulator_processes = 1"], spawn=false,
@@ -200,7 +198,7 @@ function run_sandbox(; io::IO=stdout, verbose::Bool=true)
             if verbose
                 ok = outcome.exitcode == scenario.expected && !leaked &&
                      isempty(missing_fragments)
-                println(io, rpad(ok ? "[ok]" : "[UNEXPECTED]", 14), "exit ",
+                println(io, rpad(ok ? "[ok]" : "[failed]", 14), "exit ",
                         outcome.exitcode, " (expected ", scenario.expected, ")   ",
                         scenario.description)
                 for fragment in missing_fragments
@@ -213,7 +211,7 @@ function run_sandbox(; io::IO=stdout, verbose::Bool=true)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    println("Running the command-line sandbox: stub emulator, throwaway configuration, no network.\n")
+    println("Sandbox run: stub emulator, no network.\n")
     results = run_sandbox()
     failures = count(r -> r.exitcode != r.expected || r.leaked ||
                           !isempty(r.missing_fragments), results)

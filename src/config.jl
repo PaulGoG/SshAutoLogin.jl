@@ -61,23 +61,28 @@ function parse_config(dict::AbstractDict)::SessionConfig
 
     globals_table = typed_value(dict, "globals", AbstractDict, Dict{String, Any}(), "")
     reject_unknown_keys(globals_table, GLOBALS_KEYS, "[globals]")
-    globals = GlobalConfig(typed_value(globals_table, "connect_timeout", Integer, 10,
-                                       "[globals]"),
+    global_defaults = GlobalConfig()
+    globals = GlobalConfig(typed_value(globals_table, "connect_timeout", Integer,
+                                       global_defaults.connect_timeout, "[globals]"),
                            typed_value(globals_table, "strict_host_key_checking",
-                                       AbstractString, "accept-new", "[globals]"),
-                           typed_value(globals_table, "log_level", AbstractString, "ERROR",
-                                       "[globals]"))
+                                       AbstractString,
+                                       global_defaults.strict_host_key_checking,
+                                       "[globals]"),
+                           typed_value(globals_table, "log_level", AbstractString,
+                                       global_defaults.log_level, "[globals]"))
 
     terminal_table = typed_value(dict, "terminal", AbstractDict, Dict{String, Any}(), "")
     reject_unknown_keys(terminal_table, TERMINAL_KEYS, "[terminal]")
+    terminal_defaults = TerminalOptions()
     terminal = TerminalOptions(typed_value(terminal_table, "emulator", AbstractString,
-                                           "konsole", "[terminal]"),
-                               typed_value(terminal_table, "mode", AbstractString, "tabs",
-                                           "[terminal]"),
-                               typed_value(terminal_table, "hold", Bool, false,
-                                           "[terminal]"),
+                                           terminal_defaults.emulator, "[terminal]"),
+                               typed_value(terminal_table, "mode", AbstractString,
+                                           String(terminal_defaults.mode), "[terminal]"),
+                               typed_value(terminal_table, "hold", Bool,
+                                           terminal_defaults.hold, "[terminal]"),
                                typed_value(terminal_table, "launch_settle_timeout", Real,
-                                           30, "[terminal]"))
+                                           terminal_defaults.launch_settle_timeout,
+                                           "[terminal]"))
 
     if !haskey(dict, "targets")
         throw(ArgumentError("Configuration is missing the mandatory [[targets]] array."))
@@ -112,8 +117,8 @@ end
     load_config(path::AbstractString)::SessionConfig
 
 Read a TOML configuration file and return the validated [`SessionConfig`](@ref).
-Throws `ArgumentError` if the file is missing, is not valid TOML, or violates the
-schema.
+Throws `ArgumentError` if the file is missing, is readable by group or others (it holds
+passwords and must have mode 600), is not valid TOML, or violates the schema.
 
 # Example
 ```julia
@@ -123,6 +128,10 @@ config = load_config("config.toml")
 function load_config(path::AbstractString)::SessionConfig
     if !isfile(path)
         throw(ArgumentError("Configuration file not found: $(path)"))
+    end
+    mode = filemode(path) & 0o777
+    if mode & 0o077 != 0
+        throw(ArgumentError("Configuration file '$(path)' is readable by other users (mode $(string(mode; base=8, pad=3))). It holds passwords; set it to mode 600: chmod 600 '$(path)'"))
     end
     parsed = try
         TOML.parsefile(path)

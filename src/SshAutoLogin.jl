@@ -16,18 +16,11 @@ export SshTarget,
        MissingBinaryError,
        load_config,
        parse_config,
-       validate_target_fields,
-       validate_global_fields,
-       validate_terminal_fields,
-       is_valid_host,
-       command_string,
-       get_runtime_directory,
-       clean_runtime_directory!,
-       generate_target_wrapper_script,
-       generate_tabs_file_content,
-       build_tabs_launch_command,
-       build_single_window_command,
        plan_sessions,
        launch_sessions
+
+# `main` is the public command-line driver; it is not exported so that `using` never
+# places a `main` in Main.
+VERSION >= v"1.11" && eval(Expr(:public, :main))
 
 end # module SshAutoLogin

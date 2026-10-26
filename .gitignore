@@ -1,13 +1,13 @@
-# Local configuration with credentials
-config.toml
-*.local.toml
-credentials.toml
-.env
+# Every TOML file except the tracked environment files and the configuration template,
+# so that no configuration holding credentials can be committed
+*.toml
+!/Project.toml
+!/test/Project.toml
+!/format/Project.toml
+!/config.example.toml
+!/.JuliaFormatter.toml
 
-# Julia environment and coverage artifacts
-/Manifest.toml
-test/Manifest.toml
-format/Manifest.toml
+# Coverage artifacts
 *.jl.cov
 *.jl.*.cov
 *.jl.mem

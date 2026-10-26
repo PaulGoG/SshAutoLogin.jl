@@ -44,34 +44,39 @@ end
     parse_arguments(args; default_config=default_config_path())::CliOptions
 
 Parse the command line of the driver. A bare argument is the configuration path. Throws
-`ArgumentError` for an unrecognized option or `--config` without a path.
+`ArgumentError` for an unrecognized option, `--config` without a path, or a
+configuration path given more than once.
 """
 function parse_arguments(args::AbstractVector{<:AbstractString};
                          default_config::AbstractString=default_config_path())::CliOptions
-    config_path = String(default_config)
+    config_path = nothing
     dry_run = false
     index = 1
     while index <= length(args)
         arg = args[index]
         if arg in ("-h", "--help")
-            return CliOptions(true, config_path, dry_run)
+            return CliOptions(true, something(config_path, String(default_config)), dry_run)
         elseif arg in ("-d", "--dry-run")
             dry_run = true
             index += 1
         elseif arg in ("-c", "--config")
-            if index + 1 > length(args)
+            if index + 1 > length(args) || startswith(args[index + 1], "-")
                 throw(ArgumentError("$(arg) requires a path argument."))
             end
+            config_path === nothing ||
+                throw(ArgumentError("the configuration file was given more than once."))
             config_path = String(args[index + 1])
             index += 2
         elseif startswith(arg, "-")
             throw(ArgumentError("unrecognized option '$(arg)'."))
         else
+            config_path === nothing ||
+                throw(ArgumentError("the configuration file was given more than once."))
             config_path = String(arg)
             index += 1
         end
     end
-    return CliOptions(false, config_path, dry_run)
+    return CliOptions(false, something(config_path, String(default_config)), dry_run)
 end
 
 """
@@ -95,7 +100,10 @@ function run_driver(args::AbstractVector{<:AbstractString}, io::IO, err::IO)::In
 
     if !isfile(options.config_path)
         println(err, "Error: configuration file not found at '$(options.config_path)'.")
-        println(err, "Create one from the template: cp config.example.toml config.toml")
+        if options.config_path == default_config_path()
+            println(err,
+                    "Create one from the template: install -m 600 config.example.toml config.toml")
+        end
         return 1
     end
 
@@ -124,7 +132,7 @@ function run_driver(args::AbstractVector{<:AbstractString}, io::IO, err::IO)::In
     processes = try
         launch_sessions(config)
     catch e
-        e isa MissingBinaryError || rethrow()
+        e isa Union{MissingBinaryError, ArgumentError} || rethrow()
         println(err, "Error: ", sprint(showerror, e))
         return 1
     end
@@ -137,8 +145,9 @@ end
 
 Run the command-line driver (see [`usage`](@ref)) and return the exit status instead of
 calling `exit`: 0 when the sessions were dispatched or the dry run printed, 1 on a
-usage, configuration, or missing-binary error. The dry-run listing and the usage text go
-to `io`; error messages and log records go to `err`. `scripts/run.jl` is a thin wrapper
+usage, configuration, missing-binary, or missing-runtime-directory error. The dry-run
+listing, and the usage text when `--help` is given, go to `io`; error messages, the usage
+text after a usage error, and log records go to `err`. `scripts/run.jl` is a thin wrapper
 around this function.
 
 # Example

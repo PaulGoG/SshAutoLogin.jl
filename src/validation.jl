@@ -17,9 +17,10 @@ const HOSTNAME_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A
     IPV6_PATTERN
 
 IPv6 literal made of colon-separated hexadecimal groups, optionally with an embedded
-dotted-decimal IPv4 tail, with or without enclosing square brackets.
+dotted-decimal IPv4 tail. Square brackets are not accepted: `ssh` does not strip them
+from `user@host`.
 """
-const IPV6_PATTERN = r"^\[?(?=[0-9A-Fa-f:.]*[0-9A-Fa-f])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?:\.[0-9]{1,3}){0,3}\]?$"
+const IPV6_PATTERN = r"^(?=[0-9A-Fa-f:.]*[0-9A-Fa-f])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?:\.[0-9]{1,3}){0,3}$"
 
 """
     USERNAME_PATTERN
@@ -68,8 +69,9 @@ function validate_target_fields(host::AbstractString, port::Integer, user::Abstr
     if occursin(CONTROL_CHARACTER_PATTERN, password)
         throw(ArgumentError("SSH target 'password' for $(user)@$(host) must not contain control characters."))
     end
-    if occursin(CONTROL_CHARACTER_PATTERN, title) || occursin(";;", title)
-        throw(ArgumentError("SSH target 'title' ($(repr(title))) must not contain control characters or the sequence ';;'."))
+    if occursin(CONTROL_CHARACTER_PATTERN, title) || occursin(';', title) ||
+       occursin('%', title)
+        throw(ArgumentError("SSH target 'title' ($(repr(title))) must not contain control characters, ';', or '%': Konsole splits profile properties on ';' and expands '%' sequences in tab titles."))
     end
     if host_key_policy !== nothing && !(host_key_policy in VALID_HOST_KEY_POLICIES)
         throw(ArgumentError("SSH target 'strict_host_key_checking' ($(repr(host_key_policy))) must be one of $(VALID_HOST_KEY_POLICIES)."))

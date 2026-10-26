@@ -6,12 +6,16 @@ end
 
 using Test
 using SshAutoLogin
+using SshAutoLogin: is_valid_host, command_string, runtime_directory, purge_stale_launches!,
+                    generate_target_wrapper_script, generate_tabs_file_content,
+                    build_tabs_launch_command, build_single_window_command,
+                    emulator_commands
 using Aqua
 using JET
 using ExplicitImports
 
 # Characters that must survive shell quoting unchanged.
-const AWKWARD_PASSWORD = "p'ss#w\$ord`1 -x"
+const AWKWARD_PASSWORD = "p'ss#w\$ord`1 -x\\%é"
 
 function write_executable(path::AbstractString, content::AbstractString)
     write(path, content)
@@ -24,11 +28,11 @@ end
 const CONSUMING_KONSOLE = """
 #!/bin/sh
 sleep 0.3
-if [ "\$1" = "--nofork" ] && [ "\$2" = "--tabs-from-file" ]; then
+if [ "\$1" = "--separate" ] && [ "\$2" = "--tabs-from-file" ]; then
     sed -n 's/.*;; command: //p' "\$3" | while read -r command; do
         "\$command" </dev/null >/dev/null 2>&1
     done
-elif [ "\$1" = "--separate" ]; then
+elif [ "\$1" = "--separate" ] && [ "\$2" = "-p" ]; then
     "\$5" </dev/null >/dev/null 2>&1
 fi
 exit 0
@@ -36,6 +40,9 @@ exit 0
 
 # Stub emulator that fails before opening anything.
 const FAILING_KONSOLE = "#!/bin/sh\nexit 3\n"
+
+# Stub emulator that outlives the settle timeout without executing anything.
+const SLOW_KONSOLE = "#!/bin/sh\nsleep 1\nexit 0\n"
 
 """
     with_stub_environment(f, konsole_script)
@@ -76,11 +83,11 @@ end
 
     @testset "Field validation" begin
         for host in ("node01.cluster.local", "192.168.1.10", "localhost", "a-b.c.", "::1",
-                     "[2001:db8::1]", "2001:db8::1", "::ffff:192.0.2.1")
+                     "2001:db8::1", "::ffff:192.0.2.1")
             @test is_valid_host(host)
         end
         for host in ("", "host name", "bad_host!", "-leading.dash", "a..b", ":", "::",
-                     "a"^254, "host;rm -rf /")
+                     "a"^254, "host;rm -rf /", "[2001:db8::1]", "[::1", "::1]")
             @test !is_valid_host(host)
         end
 
@@ -97,6 +104,9 @@ end
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin", "a\nb")
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin", "secret",
                                              "A ;; B")
+        @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin", "secret", "A; B")
+        @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin", "secret",
+                                             "50% load")
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin", "secret", "A\nB")
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin", "secret", "title",
                                              "invalid_policy")
@@ -259,6 +269,23 @@ end
             @test_throws ArgumentError load_config(path)
         end
         @test_throws ArgumentError load_config(joinpath(tempdir(), "does-not-exist.toml"))
+
+        # The template must satisfy the schema it documents.
+        mktemp() do path, io
+            write(io, read(joinpath(pkgdir(SshAutoLogin), "config.example.toml"), String))
+            close(io)
+            @test load_config(path) isa SessionConfig
+        end
+
+        # A configuration readable by others is refused before it is parsed.
+        mktemp() do path, io
+            write(io, toml_content)
+            close(io)
+            chmod(path, 0o644)
+            err = captured_error(() -> load_config(path))
+            @test err isa ArgumentError
+            @test occursin("mode 644", sprint(showerror, err))
+        end
     end
 
     @testset "Wrapper scripts and emulator commands" begin
@@ -270,27 +297,35 @@ end
 
         script = generate_target_wrapper_script(target2, globals)
         @test startswith(script, "#!/usr/bin/env bash\n")
-        @test occursin("rm -f -- \"\$0\"", script)
-        @test occursin("exec 3< <(printf -- '%s\\n' " *
-                       Base.shell_escape_posixly(AWKWARD_PASSWORD) * ")", script)
-        @test occursin("exec sshpass -d 3 ssh -p 2222 -o StrictHostKeyChecking=no " *
-                       "-o ConnectTimeout=10 -o LogLevel=ERROR -o NumberOfPasswordPrompts=1 " *
-                       "'guest@192.168.1.20'", script)
         @test !occursin("SSHPASS", script)
 
-        hold_script = generate_target_wrapper_script(target1, globals; hold=true)
-        @test occursin("status=\$?", hold_script)
-        @test occursin("read -r _", hold_script)
-        @test !occursin("exec sshpass", hold_script)
-
-        # The wrapper delivers the exact password over file descriptor 3 and removes itself.
+        # The wrapper delivers the ssh argument vector and the exact password over file
+        # descriptor 3, then removes itself.
         mktempdir() do dir
-            write_executable(joinpath(dir, "sshpass"), "#!/bin/sh\ncat <&3\n")
+            write_executable(joinpath(dir, "sshpass"),
+                             "#!/bin/sh\nprintf '%s\\n' \"\$@\"\ncat <&3\n")
             wrapper = write_executable(joinpath(dir, "target.sh"), script)
             delivered = withenv("PATH" => dir * ":" * ENV["PATH"]) do
                 return read(`$(wrapper)`, String)
             end
-            @test delivered == AWKWARD_PASSWORD * "\n"
+            expected = ["-d", "3", "ssh", "-p", "2222", "-o", "StrictHostKeyChecking=no",
+                        "-o", "ConnectTimeout=10", "-o", "LogLevel=ERROR",
+                        "-o", "PubkeyAuthentication=no",
+                        "-o", "PreferredAuthentications=keyboard-interactive,password",
+                        "-o", "NumberOfPasswordPrompts=1", "guest@192.168.1.20"]
+            @test delivered == join(expected, "\n") * "\n" * AWKWARD_PASSWORD * "\n"
+            @test !isfile(wrapper)
+        end
+
+        # With hold, the wrapper reports the exit status and waits for Enter.
+        hold_script = generate_target_wrapper_script(target1, globals; hold=true)
+        mktempdir() do dir
+            write_executable(joinpath(dir, "sshpass"), "#!/bin/sh\nexit 7\n")
+            wrapper = write_executable(joinpath(dir, "hold.sh"), hold_script)
+            output = withenv("PATH" => dir * ":" * ENV["PATH"]) do
+                return read(pipeline(`$(wrapper)`; stdin=IOBuffer("\n")), String)
+            end
+            @test occursin("exit status 7", output)
             @test !isfile(wrapper)
         end
 
@@ -301,8 +336,8 @@ end
 
         config_tabs = SessionConfig(globals, TerminalOptions("konsole", :tabs, false),
                                     [target1, target2])
-        @test build_tabs_launch_command(config_tabs, "/run/tabs.konsole").exec ==
-              ["konsole", "--nofork", "--tabs-from-file", "/run/tabs.konsole"]
+        @test build_tabs_launch_command(config_tabs.terminal, "/run/tabs.konsole").exec ==
+              ["konsole", "--separate", "--tabs-from-file", "/run/tabs.konsole"]
         window = build_single_window_command(target1,
                                              TerminalOptions("konsole", :windows, true),
                                              "/run/t1.sh")
@@ -330,23 +365,26 @@ end
     @testset "Runtime directory" begin
         mktempdir() do runtime_dir
             withenv("XDG_RUNTIME_DIR" => runtime_dir) do
-                dir = get_runtime_directory()
+                dir = runtime_directory()
                 @test dir == joinpath(runtime_dir, "ssh-autologin")
                 @test isdir(dir)
                 @test (filemode(dir) & 0o777) == 0o700
-                marker = joinpath(dir, "stale.sh")
-                write(marker, "x")
-                clean_runtime_directory!(dir)
-                @test isdir(dir)
-                @test !isfile(marker)
+                stale = mkpath(joinpath(dir, "launch-stale"))
+                write(joinpath(stale, "target_1.sh"), "x")
+                other = mkpath(joinpath(dir, "other"))
+                purge_stale_launches!(dir, 3600)
+                @test isdir(stale)
+                purge_stale_launches!(dir, -1.0)
+                @test !isdir(stale)
+                @test isdir(other)
             end
         end
-        fallback = withenv("XDG_RUNTIME_DIR" => nothing) do
-            return @test_logs (:warn, r"XDG_RUNTIME_DIR") get_runtime_directory()
+        withenv("XDG_RUNTIME_DIR" => nothing) do
+            @test_throws ArgumentError runtime_directory()
         end
-        @test isdir(fallback)
-        @test (filemode(fallback) & 0o777) == 0o700
-        rm(fallback; recursive=true)
+        withenv("XDG_RUNTIME_DIR" => joinpath(tempdir(), "does-not-exist")) do
+            @test_throws ArgumentError runtime_directory()
+        end
     end
 
     @testset "Launch with stub emulator" begin
@@ -366,20 +404,45 @@ end
             end
         end
 
-        # An emulator that exits without executing the wrappers: warning, files retained.
+        # An emulator that exits without executing the wrappers: warning, directory removed.
         config = SessionConfig(globals, TerminalOptions("konsole", :tabs, false, 5),
                                targets)
         with_stub_environment(FAILING_KONSOLE) do _, runtime_dir
-            processes = @test_logs (:warn, r"settle timeout") match_mode=:any launch_sessions(config)
+            processes = @test_logs (:warn, r"exited before") match_mode=:any launch_sessions(config)
             wait(processes[1])
             @test processes[1].exitcode == 3
+            @test isempty(readdir(joinpath(runtime_dir, "ssh-autologin")))
+        end
+
+        # An emulator still running when the settle timeout elapses: warning, files kept
+        # with private modes, then purged by a later launch once they are stale.
+        slow_config = SessionConfig(globals, TerminalOptions("konsole", :tabs, false, 0.2),
+                                    targets)
+        with_stub_environment(SLOW_KONSOLE) do stub_dir, runtime_dir
+            processes = @test_logs (:warn, r"settle timeout") match_mode=:any launch_sessions(slow_config)
             session_dir = joinpath(runtime_dir, "ssh-autologin")
-            remaining = readdir(session_dir)
-            @test "target_1.sh" in remaining
-            @test "target_2.sh" in remaining
-            @test "tabs.konsole" in remaining
-            @test (filemode(joinpath(session_dir, "target_1.sh")) & 0o777) == 0o700
-            @test (filemode(joinpath(session_dir, "tabs.konsole")) & 0o777) == 0o600
+            launches = readdir(session_dir; join=true)
+            @test length(launches) == 1
+            launch_dir = launches[1]
+            @test startswith(basename(launch_dir), "launch-")
+            @test (filemode(launch_dir) & 0o777) == 0o700
+            @test Set(readdir(launch_dir)) ==
+                  Set(["target_1.sh", "target_2.sh", "tabs.konsole"])
+            @test (filemode(joinpath(launch_dir, "target_1.sh")) & 0o777) == 0o700
+            @test (filemode(joinpath(launch_dir, "tabs.konsole")) & 0o777) == 0o600
+            foreach(wait, processes)
+            sleep(0.5)
+            # The kept directory is now older than one second; a launch with that settle
+            # timeout and an emulator that executes the wrappers at once purges it and
+            # removes its own directory.
+            write_executable(joinpath(stub_dir, "konsole"),
+                             replace(CONSUMING_KONSOLE, "sleep 0.3\n" => ""))
+            later_config = SessionConfig(globals,
+                                         TerminalOptions("konsole", :tabs, false, 1.0),
+                                         targets)
+            later = launch_sessions(later_config)
+            foreach(wait, later)
+            @test isempty(readdir(session_dir))
         end
 
         mktempdir() do empty_dir
@@ -389,6 +452,7 @@ end
         end
         @test occursin("sshpass, konsole",
                        sprint(showerror, MissingBinaryError(["sshpass", "konsole"])))
+        @test occursin("bash", sprint(showerror, MissingBinaryError(["bash"])))
     end
 
     @testset "Command-line driver" begin
@@ -405,6 +469,9 @@ end
         @test !defaults.dry_run
         @test_throws ArgumentError parse(["--bogus"])
         @test_throws ArgumentError parse(["--config"])
+        @test_throws ArgumentError parse(["--config", "--dry-run"])
+        @test_throws ArgumentError parse(["a.toml", "b.toml"])
+        @test_throws ArgumentError parse(["--config", "a.toml", "b.toml"])
         @test endswith(SshAutoLogin.default_config_path(), "config.toml")
 
         # main returns the status instead of exiting and writes to the given streams
@@ -421,8 +488,7 @@ end
     end
 
     @testset "Command-line interface (sandbox)" begin
-        # Exercises scripts/run.jl end to end against a stub emulator and throwaway
-        # configurations: no network, no real host, no real credential, no desktop session.
+        # Runs the sandbox scenarios and asserts their expectations.
         include(joinpath(dirname(@__DIR__), "sandbox", "run.jl"))
         results = run_sandbox(; verbose=false)
         @test !isempty(results)

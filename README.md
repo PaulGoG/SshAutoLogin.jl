@@ -7,7 +7,7 @@
 [![Platform](https://img.shields.io/badge/platform-Linux-333333?logo=linux&logoColor=white)](#environment-setup)
 [![Aqua QA](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
 
-Opens one KDE Konsole tab, or one window, per remote host listed in a TOML file and logs in with password authentication, so that a set of compute nodes is reachable with a single command.
+Opens one KDE Konsole tab, or one window, per remote host listed in a TOML file and logs in to each with its password.
 
 ```
 SshAutoLogin/
@@ -27,7 +27,7 @@ The complete tree is under [Repository layout](#repository-layout).
 
 ## Environment setup
 
-Linux with a systemd user session. Fedora with KDE Plasma is the development platform; any distribution that ships Konsole works. The launcher needs Konsole, the OpenSSH client, and `sshpass` 1.06 or newer:
+Linux with a systemd user session, which provides `XDG_RUNTIME_DIR`; the launcher refuses to run without it. Fedora with KDE Plasma is the development platform; any distribution that ships Konsole works. The launcher needs Konsole, Bash, the OpenSSH client, and `sshpass` 1.06 or newer:
 
 ```bash
 sudo dnf install konsole openssh-clients sshpass
@@ -35,7 +35,7 @@ sudo dnf install konsole openssh-clients sshpass
 
 Julia 1.10 or newer.
 
-Clone the repository and use it in place; this is the intended way to run the command-line entry point:
+Clone the repository and instantiate the environments:
 
 ```bash
 git clone https://github.com/PaulGoG/SshAutoLogin.jl.git
@@ -45,14 +45,14 @@ julia test/activate.jl     # test environment, developed against the local sourc
 julia format/activate.jl   # formatting environment
 ```
 
-The package is not registered and is meant to be run from the clone.
+The package is not registered; run it from the clone.
 
 ## Entry points
 
-Copy the template and fill in the targets. `config.toml` is ignored by git.
+Copy the template with mode 600 and fill in the targets; the launcher refuses a configuration readable by other users, and git ignores every `.toml` file except the template and the environment files.
 
 ```bash
-cp config.example.toml config.toml
+install -m 600 config.example.toml config.toml
 ```
 
 | Task | Command |
@@ -61,11 +61,11 @@ cp config.example.toml config.toml
 | Use another configuration file | `julia scripts/run.jl --config path/to/config.toml` |
 | Print the emulator commands without launching | `julia scripts/run.jl --dry-run` |
 | Run the test suite | `julia test/runtests.jl` |
-| Exercise the CLI safely, no network | `julia sandbox/run.jl` |
+| Exercise the CLI against a stub emulator, no network | `julia sandbox/run.jl` |
 | Format the sources | `julia format/format.jl` |
 | Check formatting without writing | `julia format/format.jl --check` |
 
-Every script activates its own environment, so `--project` is never needed. It only calls `SshAutoLogin.main(args; io, err)`, which returns the exit status (0 on success, 1 on a usage, configuration, or missing-binary error) and writes the dry-run listing to `io` and the diagnostics to `err`.
+Every script activates its own environment, so `--project` is never needed. `scripts/run.jl` only calls `SshAutoLogin.main(args; io, err)`, which returns the exit status (0 on success, 1 on a usage, configuration, missing-binary, or missing-runtime-directory error) and writes the dry-run listing to `io` and the diagnostics to `err`. The configuration path may be given once, as `--config PATH` or as a bare argument.
 
 From Julia:
 
@@ -92,7 +92,7 @@ SshAutoLogin.main(["--dry-run", "config.toml"])   # the command-line driver, in 
 ```mermaid
 flowchart LR
     cfg["config.toml<br/>hosts, ports, passwords"]
-    wrap["one wrapper per host<br/>tmpfs, mode 0700, self-deleting"]
+    wrap["one wrapper per host<br/>fresh launch directory on tmpfs,<br/>mode 0700, self-deleting"]
     kon["Konsole<br/>one window with tabs,<br/>or one window per host"]
     t1["tab 1, ssh session"]
     tn["tab N, ssh session"]
@@ -102,7 +102,7 @@ flowchart LR
     kon --> tn
 ```
 
-The password never reaches a command line or an environment. Each wrapper hands it to `sshpass` on file descriptor 3 and removes itself from the file system as its first action. [Security model](#security-model) has the details.
+The password never reaches a command line or an environment; [Security model](#security-model) has the details.
 
 ## Configuration
 
@@ -127,25 +127,25 @@ title = "Cluster Node 01"                # optional; default: user@host:port
 strict_host_key_checking = "accept-new"  # optional per-target override
 ```
 
-The parser rejects unknown keys, wrong value types, and values outside the documented constraints, naming the offending key. Host names must satisfy RFC 1123 (IPv4 and IPv6 literals are accepted as well), account names must be a letter or underscore followed by letters, digits, `.`, `_`, or `-`, passwords must be non-empty and free of control characters, and titles must not contain the sequence `;;`, which delimits fields in Konsole's tab list.
+The parser rejects unknown keys, wrong value types, and values outside the documented constraints, naming the offending key. Host names must satisfy RFC 1123; IPv4 and IPv6 literals are accepted as well, the latter without square brackets, which `ssh` does not strip. Account names must be a letter or underscore followed by letters, digits, `.`, `_`, or `-`; passwords must be non-empty and free of control characters; titles must not contain `;` or `%`, which Konsole interprets as a property separator and as a format placeholder.
 
 ## How a session is opened
 
-For every target the launcher writes a short Bash script into `$XDG_RUNTIME_DIR/ssh-autologin/`, a user-private directory (mode 0700) on an in-memory file system. The script removes itself as its first action, hands the password to `sshpass` through a pipe on file descriptor 3, and replaces itself with `sshpass -d 3 ssh ...`. In `tabs` mode Konsole is started once with `--tabs-from-file` pointing at a list with one script per tab; in `windows` mode Konsole is started once per target. The launcher then waits, at most `launch_settle_timeout` seconds, until every script has removed itself, deletes the tab list, and returns. If the emulator exits early or the wait times out, a warning reports the remaining files; they are purged at the next launch.
+For every launch the launcher creates a fresh directory under `$XDG_RUNTIME_DIR/ssh-autologin/` (mode 0700, on an in-memory file system) and writes one short Bash script per target into it. The script removes itself as its first action, hands the password to `sshpass` through a pipe on file descriptor 3, and replaces itself with `sshpass -d 3 ssh ...`. In `tabs` mode Konsole is started once with `--tabs-from-file` pointing at a list with one script per tab; in `windows` mode Konsole is started once per target. Konsole runs in its own process (`--separate`), detached from the launcher's session, so an interrupt of the launcher does not reach the sessions. The launcher then waits, at most `launch_settle_timeout` seconds, until every script has removed itself, and removes the launch directory. If the emulator exits before executing every script, the directory is removed as well and a warning names the scripts left; if the wait times out while the emulator is still running, the directory is kept with a warning, and a later launch removes it once it is older than the settle timeout.
 
-With `hold = true` the script does not replace itself: it waits for the SSH session to end, prints the exit status, and waits for Enter before the tab closes. Because this is implemented in the script rather than with Konsole's `--hold`, it applies to every tab.
+With `hold = true` the script does not replace itself: it waits for the SSH session to end, prints the exit status, and waits for Enter before the tab closes. Because this is implemented in the script rather than with Konsole's `--hold`, it applies to every tab. With `hold = false` a failed login closes the tab at once; set `hold = true` to read the error.
 
 ## Security model
 
-The password is read from `config.toml` into memory and written into the wrapper script, which lives on tmpfs with mode 0700 and unlinks itself when executed; under normal operation it exists for a fraction of a second. `sshpass -d` reads the password from a pipe, so it never appears in a process environment or an argument vector (`ps`, `/proc/*/cmdline`, `/proc/*/environ`). Nothing the package prints, logs, or returns from `show` contains a password, including `--dry-run` output.
+The password is read from `config.toml`, which must not be readable by other users (the loader refuses any other mode), and written into the wrapper script, which lives in a launch directory of mode 0700 on tmpfs and unlinks itself when executed; under normal operation it exists for a fraction of a second. `sshpass -d` reads the password from a pipe, so it never appears in a process environment or an argument vector (`ps`, `/proc/*/cmdline`, `/proc/*/environ`). No log record, `show` rendering, or `--dry-run` listing contains a password. `ssh` runs with public-key authentication disabled and the preferred methods pinned to keyboard-interactive and password, so an agent holding many keys cannot exhaust the server's authentication attempts and an encrypted key cannot raise a passphrase prompt that `sshpass` does not answer.
 
-The threat model is a single-user workstation. A process running under the same account can read the wrapper during its short lifetime, and the package does not defend against a compromised account or a hostile administrator. Host-key verification follows the configured policy: `accept-new` (default) trusts a host on first contact and refuses a changed key, `yes` requires the key to be known already, and `no` disables verification. If `XDG_RUNTIME_DIR` is unset the scripts are written to a temporary directory on the regular file system and a warning is printed.
+The threat model is a single-user workstation. A process running under the same account can read the wrapper during its short lifetime, and the package does not defend against a compromised account or a hostile administrator. Host-key verification follows the configured policy: `accept-new` (default) trusts a host on first contact and refuses a changed key, `yes` requires the key to be known already, and `no` disables verification.
 
 Vulnerability reports: see [SECURITY.md](SECURITY.md).
 
 ## Limitations
 
-Linux only, and Konsole is the only supported emulator. Authentication is by password only; hosts that accept keys are better served by `ssh` with an agent, and key-based targets are a planned addition.
+Linux and Konsole only. Authentication is by password; for hosts that accept keys, `ssh` with an agent is the better tool. Key-based targets are planned.
 
 ## Repository layout
 
@@ -155,10 +155,10 @@ Linux only, and Konsole is the only supported emulator. Authentication is by pas
 ```
 SshAutoLogin/
 ├── .github/
-│   ├── dependabot.yml         # Weekly updates of the GitHub Actions pins and the formatting environment
+│   ├── dependabot.yml         # Weekly updates of the GitHub Actions pins and the test and formatting environments
 │   └── workflows/
-│       └── CI.yml             # Test suite on Julia LTS, stable, and pre-release
-├── .gitignore                 # Credentials, manifests, editor artifacts
+│       └── CI.yml             # Test suite and formatting check on Julia LTS, stable, and pre-release
+├── .gitignore                 # Every .toml except the tracked ones, coverage and editor artifacts
 ├── .JuliaFormatter.toml       # Formatting rules (YAS style)
 ├── CHANGELOG.md               # Release history
 ├── LICENSE                    # MIT

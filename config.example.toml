@@ -1,4 +1,4 @@
-# SshAutoLogin configuration template. Copy to config.toml (ignored by git) and edit.
+# SshAutoLogin configuration template. Install as config.toml with mode 600 and edit.
 
 [globals]
 # OpenSSH ConnectTimeout
@@ -36,7 +36,7 @@ user = "admin"
 # Authentication password
 password = "example_password_1"
 
-# Tab or window title (optional; default: user@host:port)
+# Tab or window title (optional; default: user@host:port; no ';' or '%')
 title = "Cluster Node 01"
 
 # Host-key policy override for this target (optional)
