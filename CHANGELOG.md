@@ -4,6 +4,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-26
+
 ### Changed
 
 - **Breaking:** the exported names are the four configuration types, `MissingBinaryError`, `load_config`, `parse_config`, `plan_sessions`, and `launch_sessions`; the validators, the wrapper-script generator, the command builders, and the runtime-directory helpers are internal. `SshAutoLogin.main` is public but not exported.
@@ -60,7 +62,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 - Command-line entry point `scripts/run.jl` with `--config` and `--dry-run`.
 - Test suite with Aqua, JET, ExplicitImports, and launch tests against a stub emulator; formatting enforced by a dedicated `format/` environment and CI job.
 
-[Unreleased]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/PaulGoG/SshAutoLogin.jl/releases/tag/v0.1.0
