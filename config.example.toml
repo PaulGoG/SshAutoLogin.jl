@@ -18,10 +18,10 @@ emulator = "konsole"  # one of: "konsole"
 mode = "tabs"  # one of: "tabs" | "windows"
 
 # Keep each tab open after the SSH session ends, until Enter is pressed
-hold = false  # one of: true | false
+hold = false
 
 # Time allowed for the emulator to start every session before a warning is issued
-launch_settle_timeout = 30  # number > 0; units: s
+launch_settle_timeout = 30  # finite number > 0; units: s
 
 [[targets]]
 # Host name, IPv4 address, or IPv6 literal
@@ -31,12 +31,12 @@ host = "192.168.1.100"
 port = 22  # integer in [1, 65535]
 
 # Remote account name
-user = "admin"
+user = "admin"  # letter or underscore, then letters, digits, '.', '_', '-'; at most 32 characters
 
 # Authentication password
 password = "example_password_1"
 
-# Tab or window title (optional; default: user@host:port; no ';' or '%')
+# Tab or window title (optional; default: user@host:port; no control characters, ';', or '%')
 title = "Cluster Node 01"
 
 # Host-key policy override for this target (optional)

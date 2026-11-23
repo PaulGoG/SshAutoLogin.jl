@@ -4,6 +4,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+### Fixed
+
+- A TOML syntax error on a `password` line printed that line, password included, in the error message. A syntax error is now reported by its kind and line number, without the line.
+- A trailing newline passed the `host` and `user` checks (`host = "node01\n"`), and the default title built from them split the line of that target in the Konsole tabs file. The patterns are anchored at the end of the string.
+- A configuration file its owner cannot read made the driver throw instead of exiting with status 1.
+- A `launch_settle_timeout` of about 1.8e10 s or more overflowed the nanosecond deadline after the wrappers had been written. The wait now measures elapsed time.
+- Configuration errors were printed as `Error: ArgumentError: ...`; the exception type is gone.
+
+### Changed
+
+- The formatting check runs in its own workflow, `Format.yml`, and the test suite runs JET on the stable Julia release only.
+- README and SECURITY.md revised; the badge row lists the checks that run and reads the Julia bound from `Project.toml`.
+
 ## [0.3.0] - 2026-10-26
 
 ### Changed
