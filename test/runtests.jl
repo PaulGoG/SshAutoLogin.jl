@@ -288,6 +288,19 @@ end
             @test err isa ArgumentError
             @test occursin("near line 5", sprint(showerror, err))
             @test !occursin("never-echoed", sprint(showerror, err))
+            # No parser error stays on the exception stack as a cause: the display of an
+            # uncaught error prints causes, and that of a parser error prints the line.
+            causes = try
+                load_config(path)
+                0
+            catch
+                length(current_exceptions())
+            end
+            @test causes == 1
+            # An error at the start of a line is reported on that line
+            write(path, "[[targets]]\nhost = \"192.168.1.1\"\n= 1\n")
+            @test occursin("near line 3",
+                           sprint(showerror, captured_error(() -> load_config(path))))
         end
 
         # A file its owner cannot read is a configuration error, not a crash. Root reads
@@ -302,7 +315,12 @@ end
                 err isa SystemError || rethrow()
                 false
             end
-            readable || @test_throws ArgumentError load_config(path)
+            if readable
+                @test_skip "unreadable configuration file"
+            else
+                @test_throws ArgumentError load_config(path)
+                @test SshAutoLogin.main([path]; io=IOBuffer(), err=IOBuffer()) == 1
+            end
         end
         @test_throws ArgumentError load_config(joinpath(tempdir(), "does-not-exist.toml"))
 
@@ -444,7 +462,13 @@ end
         config = SessionConfig(globals, TerminalOptions("konsole", :tabs, false, 5),
                                targets)
         with_stub_environment(FAILING_KONSOLE) do _, runtime_dir
-            processes = @test_logs (:warn, r"exited before") match_mode=:any launch_sessions(config)
+            logs, processes = Test.collect_test_logs() do
+                return launch_sessions(config)
+            end
+            warning = only(filter(log -> log.level == Base.CoreLogging.Warn, logs))
+            @test occursin("exited before", warning.message)
+            @test warning.kwargs[:emulator_exit_codes] == [3]
+            @test warning.kwargs[:remaining] == ["target_1.sh", "target_2.sh"]
             wait(processes[1])
             @test processes[1].exitcode == 3
             @test isempty(readdir(joinpath(runtime_dir, "ssh-autologin")))
