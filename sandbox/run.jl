@@ -136,7 +136,14 @@ function invoke_driver(arguments::Vector{String}; spawn::Bool=false)
         # activates its own environment and must not inherit it.
         command = addenv(`$(Base.julia_cmd()) --startup-file=no $(DRIVER) $(arguments)`,
                          "JULIA_LOAD_PATH" => nothing, "JULIA_PROJECT" => nothing)
-        run(pipeline(ignorestatus(command); stdout=buffer, stderr=buffer)).exitcode
+        # Both streams go to one pipe, read to end-of-file: on Julia 1.10 a buffer handed
+        # to pipeline may still be filling when run returns.
+        pipe = Pipe()
+        process = run(pipeline(ignorestatus(command); stdout=pipe, stderr=pipe); wait=false)
+        close(pipe.in)
+        write(buffer, read(pipe))
+        wait(process)
+        process.exitcode
     else
         SshAutoLogin.main(arguments; io=buffer, err=buffer)
     end
