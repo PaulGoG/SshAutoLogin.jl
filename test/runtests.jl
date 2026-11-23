@@ -11,8 +11,15 @@ using SshAutoLogin: is_valid_host, command_string, runtime_directory, purge_stal
                     build_tabs_launch_command, build_single_window_command,
                     emulator_commands
 using Aqua
-using JET
 using ExplicitImports
+
+# JET follows the compiler, and each of its release series supports only a few Julia
+# minors. It runs on the stable release alone: the LTS resolves an old series, and a
+# pre-release may be ahead of JET.
+const RUN_JET = VERSION >= v"1.12" && isempty(VERSION.prerelease)
+if RUN_JET
+    using JET
+end
 
 # Characters that must survive shell quoting unchanged.
 const AWKWARD_PASSWORD = "p'ss#w\$ord`1 -x\\%é"
@@ -76,7 +83,7 @@ end
 @testset "SshAutoLogin.jl" begin
     @testset "Static analysis" begin
         Aqua.test_all(SshAutoLogin)
-        JET.test_package(SshAutoLogin; target_modules=[SshAutoLogin])
+        RUN_JET && JET.test_package(SshAutoLogin; target_modules=[SshAutoLogin])
         @test ExplicitImports.check_no_implicit_imports(SshAutoLogin) === nothing
         @test ExplicitImports.check_no_stale_explicit_imports(SshAutoLogin) === nothing
     end
