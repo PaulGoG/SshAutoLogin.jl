@@ -278,29 +278,33 @@ end
             @test_throws ArgumentError load_config(path)
         end
 
-        # A syntax error is reported by kind and line number; the line itself, here the
-        # password line, is never echoed.
-        mktemp() do path, io
-            write(io,
-                  "[[targets]]\nhost = \"192.168.1.1\"\nport = 22\nuser = \"root\"\npassword = \"never-echoed\" x\n")
-            close(io)
-            err = captured_error(() -> load_config(path))
-            @test err isa ArgumentError
-            @test occursin("near line 5", sprint(showerror, err))
-            @test !occursin("never-echoed", sprint(showerror, err))
-            # No parser error stays on the exception stack as a cause: the display of an
-            # uncaught error prints causes, and that of a parser error prints the line.
-            causes = try
-                load_config(path)
-                0
-            catch
-                length(current_exceptions())
+        # A syntax error is reported by kind and line number. The line itself is never
+        # echoed: it may be the password line, or a password pasted without its key. No
+        # parser error stays on the exception stack as a cause either, because the
+        # display of an uncaught error prints causes, and that of a parser error prints
+        # the line.
+        head = "[[targets]]\nhost = \"192.168.1.1\"\n"
+        for (text, line) in
+            ((head * "port = 22\nuser = \"root\"\npassword = \"never-echoed\" x\n", 5),
+             (head * "password = \"never-echoed\n", 3),
+             (head * "never-echoed\nport = 22\n", 3),
+             (head * "= 1\n", 3),
+             ("[globals\n", 1))
+            mktemp() do path, io
+                write(io, text)
+                close(io)
+                err = captured_error(() -> load_config(path))
+                @test err isa ArgumentError
+                @test occursin("near line $(line).", sprint(showerror, err))
+                @test !occursin("never-echoed", sprint(showerror, err))
+                causes = try
+                    load_config(path)
+                    0
+                catch
+                    length(current_exceptions())
+                end
+                @test causes == 1
             end
-            @test causes == 1
-            # An error at the start of a line is reported on that line
-            write(path, "[[targets]]\nhost = \"192.168.1.1\"\n= 1\n")
-            @test occursin("near line 3",
-                           sprint(showerror, captured_error(() -> load_config(path))))
         end
 
         # A file its owner cannot read is a configuration error, not a crash. Root reads
