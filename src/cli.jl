@@ -111,7 +111,7 @@ function run_driver(args::AbstractVector{<:AbstractString}, io::IO, err::IO)::In
         load_config(options.config_path)
     catch e
         e isa ArgumentError || rethrow()
-        println(err, "Error: ", sprint(showerror, e))
+        println(err, "Error: ", e.msg)
         return 1
     end
 
@@ -133,7 +133,7 @@ function run_driver(args::AbstractVector{<:AbstractString}, io::IO, err::IO)::In
         launch_sessions(config)
     catch e
         e isa Union{MissingBinaryError, ArgumentError} || rethrow()
-        println(err, "Error: ", sprint(showerror, e))
+        println(err, "Error: ", e isa ArgumentError ? e.msg : sprint(showerror, e))
         return 1
     end
     @info "Sessions dispatched" emulator_processes=length(processes)

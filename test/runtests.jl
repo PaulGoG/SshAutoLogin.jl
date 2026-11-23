@@ -87,7 +87,8 @@ end
             @test is_valid_host(host)
         end
         for host in ("", "host name", "bad_host!", "-leading.dash", "a..b", ":", "::",
-                     "a"^254, "host;rm -rf /", "[2001:db8::1]", "[::1", "::1]")
+                     "a"^254, "host;rm -rf /", "[2001:db8::1]", "[::1", "::1]",
+                     "node01\n", "::1\n")
             @test !is_valid_host(host)
         end
 
@@ -100,6 +101,7 @@ end
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin user", "secret")
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "user@x", "secret")
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "1abc", "secret")
+        @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin\n", "secret")
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin", "")
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin", "a\nb")
         @test_throws ArgumentError SshTarget("192.168.1.10", 22, "admin", "secret",
@@ -149,7 +151,7 @@ end
         @test !occursin(AWKWARD_PASSWORD, sprint(show, MIME("text/plain"), [t]))
     end
 
-    @testset "TOML configuration ingestion" begin
+    @testset "Configuration parsing" begin
         toml_content = """
         [globals]
         connect_timeout = 15
@@ -267,6 +269,33 @@ end
             write(io, "[globals\n")
             close(io)
             @test_throws ArgumentError load_config(path)
+        end
+
+        # A syntax error is reported by kind and line number; the line itself, here the
+        # password line, is never echoed.
+        mktemp() do path, io
+            write(io,
+                  "[[targets]]\nhost = \"192.168.1.1\"\nport = 22\nuser = \"root\"\npassword = \"never-echoed\" x\n")
+            close(io)
+            err = captured_error(() -> load_config(path))
+            @test err isa ArgumentError
+            @test occursin("near line 5", sprint(showerror, err))
+            @test !occursin("never-echoed", sprint(showerror, err))
+        end
+
+        # A file its owner cannot read is a configuration error, not a crash. Root reads
+        # any file, so the case is skipped there.
+        mktemp() do path, io
+            close(io)
+            chmod(path, 0o000)
+            readable = try
+                open(close, path)
+                true
+            catch err
+                err isa SystemError || rethrow()
+                false
+            end
+            readable || @test_throws ArgumentError load_config(path)
         end
         @test_throws ArgumentError load_config(joinpath(tempdir(), "does-not-exist.toml"))
 
@@ -445,6 +474,9 @@ end
             @test isempty(readdir(session_dir))
         end
 
+        # A timeout beyond the range of a nanosecond counter is still a valid wait.
+        @test SshAutoLogin.await_wrapper_consumption(String[], Base.Process[], 1.0e12)
+
         mktempdir() do empty_dir
             withenv("PATH" => empty_dir) do
                 @test_throws MissingBinaryError launch_sessions(config)
@@ -485,10 +517,18 @@ end
         @test occursin("configuration file not found", String(take!(err)))
         @test SshAutoLogin.main(["--bogus"]; io=io, err=err) == 1
         @test occursin("unrecognized option '--bogus'", String(take!(err)))
+
+        # A configuration error is printed without the exception type
+        mktemp() do path, cfg
+            write(cfg, "[[targets]]\n")
+            close(cfg)
+            chmod(path, 0o644)
+            @test SshAutoLogin.main([path]; io=io, err=err) == 1
+            @test startswith(String(take!(err)), "Error: Configuration file")
+        end
     end
 
     @testset "Command-line interface (sandbox)" begin
-        # Runs the sandbox scenarios and asserts their expectations.
         include(joinpath(dirname(@__DIR__), "sandbox", "run.jl"))
         results = run_sandbox(; verbose=false)
         @test !isempty(results)

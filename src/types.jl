@@ -1,7 +1,7 @@
 """
     SshTarget
 
-Immutable description of one remote SSH endpoint.
+One remote SSH endpoint.
 
 # Fields
 - `host::String`: host name, IPv4 address, or IPv6 literal.
@@ -80,7 +80,7 @@ Terminal-emulator launch parameters.
 - `emulator::String`: emulator executable; only `"konsole"` is supported.
 - `mode::Symbol`: `:tabs` (one window, one tab per target) or `:windows` (one window per
   target).
-- `hold::Bool`: keep each tab open after the SSH session ends, waiting for a key press.
+- `hold::Bool`: keep each tab open after the SSH session ends, until Enter is pressed.
 - `launch_settle_timeout::Float64`: seconds to wait for the emulator to consume the
   generated wrapper scripts before reporting a launch problem.
 """

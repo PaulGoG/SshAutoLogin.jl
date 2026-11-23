@@ -4,6 +4,7 @@ const VALID_LOG_LEVELS = ("QUIET", "FATAL", "ERROR", "INFO", "VERBOSE", "DEBUG",
 const VALID_TERMINAL_MODES = (:tabs, :windows)
 const VALID_TERMINAL_EMULATORS = ("konsole",)
 
+# The patterns end in \z, not $, which would also match before a final newline.
 """
     HOSTNAME_PATTERN
 
@@ -11,7 +12,7 @@ RFC 1123 host name: dot-separated labels of letters, digits, and interior hyphen
 at most 63 characters, optionally terminated by a dot. Dotted-decimal IPv4 addresses
 match as well.
 """
-const HOSTNAME_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$"
+const HOSTNAME_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?\z"
 
 """
     IPV6_PATTERN
@@ -20,7 +21,7 @@ IPv6 literal made of colon-separated hexadecimal groups, optionally with an embe
 dotted-decimal IPv4 tail. Square brackets are not accepted: `ssh` does not strip them
 from `user@host`.
 """
-const IPV6_PATTERN = r"^(?=[0-9A-Fa-f:.]*[0-9A-Fa-f])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?:\.[0-9]{1,3}){0,3}$"
+const IPV6_PATTERN = r"^(?=[0-9A-Fa-f:.]*[0-9A-Fa-f])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?:\.[0-9]{1,3}){0,3}\z"
 
 """
     USERNAME_PATTERN
@@ -29,7 +30,7 @@ Account name: a letter or underscore followed by at most 31 letters, digits, dot
 underscores, or hyphens. The `@` character is excluded so that `user@host` stays
 unambiguous.
 """
-const USERNAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9._-]{0,31}$"
+const USERNAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9._-]{0,31}\z"
 
 const CONTROL_CHARACTER_PATTERN = r"[\x00-\x1f\x7f]"
 const MAX_HOSTNAME_LENGTH = 253
@@ -47,9 +48,8 @@ end
 """
     validate_target_fields(host, port, user, password, title, host_key_policy)
 
-Validate the fields of an [`SshTarget`](@ref) against the constraints documented in
-`config.example.toml`. Throws `ArgumentError` naming the offending field. Error messages
-never contain the password.
+Validate the fields of an [`SshTarget`](@ref). Throws `ArgumentError` naming the
+offending field. Error messages never contain the password.
 """
 function validate_target_fields(host::AbstractString, port::Integer, user::AbstractString,
                                 password::AbstractString, title::AbstractString,

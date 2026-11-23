@@ -1,8 +1,8 @@
 """
     MissingBinaryError
 
-Thrown when a required executable (`ssh`, `sshpass`, or the terminal emulator) is not
-found in `PATH`.
+Thrown when a required executable (`bash`, `ssh`, `sshpass`, or the terminal emulator)
+is not found in `PATH`.
 """
 struct MissingBinaryError <: Exception
     binaries::Vector{String}
@@ -53,10 +53,10 @@ wrapper_name(index::Integer)::String = "target_$(index).sh"
 """
     runtime_directory()::String
 
-`\$XDG_RUNTIME_DIR/ssh-autologin`, created if needed and set to mode `0700`. Under a
-systemd user session `XDG_RUNTIME_DIR` is an in-memory, user-private directory, which is
-where the wrapper scripts, which hold passwords, belong. Throws `ArgumentError` when the
-variable is unset or does not name a directory.
+`\$XDG_RUNTIME_DIR/ssh-autologin`, created if needed and set to mode `0700`. The wrapper
+scripts hold passwords; under a systemd user session `XDG_RUNTIME_DIR` is user-private
+and in memory. Throws `ArgumentError` when the variable is unset or does not name a
+directory.
 """
 function runtime_directory()::String
     base = get(ENV, "XDG_RUNTIME_DIR", "")
@@ -116,8 +116,8 @@ The script unlinks itself as its first action, exposes the password to `sshpass`
 file descriptor 3 (a pipe fed by a process substitution, so the secret appears in no
 environment or argument vector), and replaces itself with `sshpass -d 3 ssh ...`. With
 `hold = true` the script instead waits for the session to end, prints its exit status,
-and waits for a key press before the tab closes. Every interpolated value is quoted
-with `Base.shell_escape_posixly`.
+and waits for Enter before the tab closes. Every interpolated value is quoted with
+`Base.shell_escape_posixly`.
 """
 function generate_target_wrapper_script(target::SshTarget, globals::GlobalConfig;
                                         hold::Bool=false)::String
@@ -177,8 +177,7 @@ end
                                 wrapper_path::AbstractString)::Cmd
 
 Return the command that opens a separate emulator window running the wrapper script of
-`target`. `--separate` runs Konsole in its own process instead of handing the request to
-a running instance, so the returned process is the emulator itself.
+`target`, with `--separate` as in [`build_tabs_launch_command`](@ref).
 """
 function build_single_window_command(target::SshTarget, terminal::TerminalOptions,
                                      wrapper_path::AbstractString)::Cmd
@@ -256,8 +255,8 @@ monotonic clock. Return whether all wrappers were consumed.
 function await_wrapper_consumption(wrapper_paths::AbstractVector{<:AbstractString},
                                    processes::AbstractVector{Base.Process},
                                    timeout_seconds::Real)::Bool
-    deadline = time_ns() + round(UInt64, timeout_seconds * 1e9)
-    while time_ns() < deadline
+    start = time_ns()
+    while (time_ns() - start) / 1e9 < timeout_seconds
         all(!isfile, wrapper_paths) && return true
         all(process_exited, processes) && break
         sleep(0.05)
@@ -268,9 +267,9 @@ end
 """
     start_emulator(cmd::Cmd)::Base.Process
 
-Start `cmd` in its own session with its standard streams closed, so that an interrupt
-of the launcher does not reach the emulator and the emulator's diagnostics do not land
-in the launcher's terminal.
+Start `cmd` in its own session with its standard streams on `/dev/null`: an interrupt of
+the launcher does not reach the emulator, and the emulator's diagnostics do not land in
+the launcher's terminal.
 """
 function start_emulator(cmd::Cmd)::Base.Process
     return run(pipeline(detach(cmd); stdin=devnull, stdout=devnull, stderr=devnull);
@@ -289,9 +288,9 @@ they are older than `launch_settle_timeout`. The wrapper scripts are written the
 emulator is started, and the function waits, at most `config.terminal.launch_settle_timeout`
 seconds, until every wrapper has removed itself. The launch directory is then removed. It
 is also removed, with a warning, when every emulator process has exited without
-executing every wrapper, because nothing is left to consume them. Only when the wait
-times out while an emulator is still running is the directory kept, with a warning; a
-later launch purges it.
+executing every wrapper, because nothing is left to consume them. If the wait times out
+while an emulator is still running, the directory is kept, with a warning, and a later
+launch purges it.
 """
 function launch_sessions(config::SessionConfig)::Vector{Base.Process}
     check_prerequisites(config.terminal)
@@ -317,10 +316,9 @@ function launch_sessions(config::SessionConfig)::Vector{Base.Process}
         rm(directory; recursive=true, force=true)
     elseif all(process_exited, processes)
         remaining = basename.(filter(isfile, wrapper_paths))
+        exit_codes = [p.exitcode for p in processes]
         rm(directory; recursive=true, force=true)
-        @warn "The emulator exited before executing every wrapper script; the launch directory was removed" emulator_exit_codes=[p.exitcode
-                                                                                                                                 for p in
-                                                                                                                                     processes] remaining
+        @warn "The emulator exited before executing every wrapper script; the launch directory was removed" emulator_exit_codes=exit_codes remaining
     else
         remaining = basename.(filter(isfile, wrapper_paths))
         @warn "Not every wrapper script was executed within the settle timeout; the launch directory is kept until a later launch purges it" directory timeout_seconds=config.terminal.launch_settle_timeout remaining
