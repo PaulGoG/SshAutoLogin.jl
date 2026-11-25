@@ -31,7 +31,7 @@ port = 22  # integer in [1, 65535]
 user = "admin"  # letter or underscore, then letters, digits, '.', '_', '-'; at most 32 characters
 
 # Authentication password
-password = "example_password_1"
+password = "example_password_1"  # non-empty; no control characters
 
 # Tab or window title (optional; default: user@host:port; no control characters, ';', or '%')
 title = "Cluster Node 01"

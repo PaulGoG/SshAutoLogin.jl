@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/PaulGoG/SshAutoLogin.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/PaulGoG/SshAutoLogin.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Aqua QA](https://juliatesting.github.io/Aqua.jl/dev/assets/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
-[![JET](https://img.shields.io/badge/tested%20with-JET.jl-233f9a)](https://github.com/aviatesk/JET.jl)
+[![JET](https://img.shields.io/badge/%F0%9F%9B%A9%EF%B8%8F_tested_with-JET.jl-233f9a)](https://github.com/aviatesk/JET.jl)
 [![Code Style: YAS](https://img.shields.io/badge/code%20style-yas-violet.svg)](https://github.com/jrevels/YASGuide)
 [![Format](https://github.com/PaulGoG/SshAutoLogin.jl/actions/workflows/Format.yml/badge.svg?branch=main)](https://github.com/PaulGoG/SshAutoLogin.jl/actions/workflows/Format.yml?query=branch%3Amain)
-[![Julia](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FPaulGoG%2FSshAutoLogin.jl%2Fmain%2FProject.toml&query=%24.compat.julia&label=julia&color=9558b2)](https://julialang.org/downloads/)
-[![Platform](https://img.shields.io/badge/platform-Linux-lightgrey)](#environment-setup)
+[![Julia](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FPaulGoG%2FSshAutoLogin.jl%2Fmain%2FProject.toml&query=%24.compat.julia&label=julia&logo=julia&color=9558b2)](https://julialang.org/downloads/)
+[![Platform](https://img.shields.io/badge/platform-Linux-lightgrey?logo=linux)](#environment-setup)
 
 Opens one KDE Konsole tab, or one window, per remote host listed in a TOML file and logs in to each with its password.
 
@@ -137,7 +137,7 @@ With `hold = true` the script does not replace itself: it waits for the SSH sess
 
 ## Security model
 
-The password is read from `config.toml`, which the loader refuses unless it is private to its owner, and is written into the wrapper script described above. That script sits in a directory of mode 0700 on tmpfs and unlinks itself when executed, so it normally exists for a fraction of a second. `sshpass -d` reads the password from a pipe, so it never appears in a process environment or an argument vector (`ps`, `/proc/*/cmdline`, `/proc/*/environ`). No log record, error message, `show` rendering, or `--dry-run` listing contains a password; a syntax error in the configuration is reported by its line number, without the line. `ssh` runs with public-key authentication disabled and the preferred methods pinned to keyboard-interactive and password. An agent holding many keys therefore cannot exhaust the server's authentication attempts, and an encrypted key cannot raise a passphrase prompt that `sshpass` does not answer.
+The password is read from `config.toml`, which the loader refuses unless it is private to its owner, and is written into the wrapper script described above. That script sits in a directory of mode 0700 under `XDG_RUNTIME_DIR`, a tmpfs in a systemd session, and unlinks itself when executed, so it normally exists for a fraction of a second. `sshpass -d` reads the password from a pipe, so it never appears in a process environment or an argument vector (`ps`, `/proc/*/cmdline`, `/proc/*/environ`). No log record, error message, `show` rendering, or `--dry-run` listing contains a password; a syntax error in the configuration is reported by its line number, without the line. `ssh` runs with public-key authentication disabled and the preferred methods pinned to keyboard-interactive and password. An agent holding many keys therefore cannot exhaust the server's authentication attempts, and an encrypted key cannot raise a passphrase prompt that `sshpass` does not answer.
 
 The threat model is a single-user workstation. A process running under the same account can read the wrapper during its short lifetime, and the package does not defend against a compromised account or a hostile administrator. Host-key verification follows the configured policy: `accept-new` (default) trusts a host on first contact and refuses a changed key, `yes` requires the key to be known already, and `no` disables verification.
 

@@ -407,7 +407,11 @@ end
                 @test_skip "unreadable configuration file"
             else
                 @test_throws ArgumentError load_config(path)
-                @test SshAutoLogin.main([path]; io=IOBuffer(), err=IOBuffer()) == 1
+                err = IOBuffer()
+                @test SshAutoLogin.main([path]; io=IOBuffer(), err=err) == 1
+                message = String(take!(err))
+                @test occursin("cannot be read: Permission denied.", message)
+                @test !occursin("SystemError", message)
             end
         end
         @test_throws ArgumentError load_config(joinpath(tempdir(), "does-not-exist.toml"))
@@ -643,7 +647,7 @@ end
     end
 
     @testset "Command-line scenarios" begin
-        with_stub_environment(CONSUMING_KONSOLE) do _, _
+        with_stub_environment(CONSUMING_KONSOLE) do _, runtime_dir
             mktempdir() do dir
                 configs = Dict{String, String}()
                 for (key, text) in ("tabs" => scenario_config("tabs"),
@@ -691,8 +695,15 @@ end
                         for fragment in scenario.fragments
                             @test occursin(fragment, outcome.output)
                         end
+                        # A launch that left wrappers behind warns and keeps or removes
+                        # its directory; a completed one does neither.
+                        if scenario.expected == 0
+                            @test !occursin("Warning", outcome.output)
+                        end
                     end
                 end
+                launches = joinpath(runtime_dir, "ssh-autologin")
+                @test !isdir(launches) || isempty(readdir(launches))
             end
         end
     end
