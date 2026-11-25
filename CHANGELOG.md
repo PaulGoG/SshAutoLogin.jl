@@ -14,6 +14,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ### Changed
 
+- **Breaking:** the `[terminal]` key `emulator` is gone. It admitted one value, `"konsole"`, and a configuration that still carries it is refused as an unknown key: delete the line. `TerminalOptions` loses the field, so its positional arguments are now `mode`, `hold`, `launch_settle_timeout`.
+- `sandbox/run.jl` is gone. Its command-line scenarios run in the test suite, on the stub emulator the other tests use.
+- `format/format.jl` no longer parses every source file before formatting, and `format/activate.jl` no longer deletes a manifest resolved by another Julia version.
+- The workflows pin their actions by commit.
 - The formatting check runs in its own workflow, `Format.yml`, and the test suite runs JET on the stable Julia release only.
 - README and SECURITY.md revised; the badge row lists the checks that run and reads the Julia bound from `Project.toml`.
 

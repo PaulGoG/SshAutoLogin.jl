@@ -14,7 +14,6 @@ Opens one KDE Konsole tab, or one window, per remote host listed in a TOML file 
 SshAutoLogin.jl/
 ├── src/                   # Package: configuration parser, wrapper scripts, launcher, CLI driver
 ├── scripts/run.jl         # Command-line entry point
-├── sandbox/run.jl         # CLI exercised against a stub emulator, no network
 ├── test/                  # Test suite and its environment
 ├── format/                # Formatting environment and script
 ├── config.example.toml    # Configuration template
@@ -62,7 +61,6 @@ install -m 600 config.example.toml config.toml
 | Use another configuration file | `julia scripts/run.jl --config path/to/config.toml` |
 | Print the emulator commands without launching | `julia scripts/run.jl --dry-run` |
 | Run the test suite | `julia test/runtests.jl` |
-| Exercise the CLI against a stub emulator, no network | `julia sandbox/run.jl` |
 | Format the sources | `julia format/format.jl` |
 | Check formatting without writing | `julia format/format.jl --check` |
 
@@ -116,7 +114,6 @@ strict_host_key_checking = "accept-new"  # one of: "accept-new" | "yes" | "no"
 log_level = "ERROR"                      # OpenSSH LogLevel
 
 [terminal]
-emulator = "konsole"                     # one of: "konsole"
 mode = "tabs"                            # one of: "tabs" | "windows"
 hold = false                             # keep the tab open after the session ends
 launch_settle_timeout = 30               # finite number > 0; units: s
@@ -174,9 +171,7 @@ SshAutoLogin.jl/
 ├── format/
 │   ├── Project.toml           # Formatting environment (JuliaFormatter 2.14)
 │   ├── activate.jl            # Activates the formatting environment
-│   └── format.jl              # Formats the repository; --check verifies without writing; refuses files that do not parse
-├── sandbox/
-│   └── run.jl                 # Exercises the CLI against a stub emulator, no network
+│   └── format.jl              # Formats the repository; --check verifies without writing
 ├── scripts/
 │   └── run.jl                 # Thin entry point around SshAutoLogin.main
 ├── src/
@@ -189,7 +184,7 @@ SshAutoLogin.jl/
 └── test/
     ├── Project.toml           # Test environment (Aqua, JET, ExplicitImports)
     ├── activate.jl            # Activates the test environment against the local source
-    └── runtests.jl
+    └── runtests.jl            # Static analysis, unit tests, launches against a stub emulator, command-line scenarios
 ```
 
 </details>
