@@ -74,10 +74,9 @@ end
 """
     TerminalOptions
 
-Terminal-emulator launch parameters.
+Launch parameters of the terminal emulator, Konsole.
 
 # Fields
-- `emulator::String`: emulator executable; only `"konsole"` is supported.
 - `mode::Symbol`: `:tabs` (one window, one tab per target) or `:windows` (one window per
   target).
 - `hold::Bool`: keep each tab open after the SSH session ends, until Enter is pressed.
@@ -85,17 +84,15 @@ Terminal-emulator launch parameters.
   generated wrapper scripts before reporting a launch problem.
 """
 struct TerminalOptions
-    emulator::String
     mode::Symbol
     hold::Bool
     launch_settle_timeout::Float64
 
-    function TerminalOptions(emulator::AbstractString="konsole",
-                             mode::Union{Symbol, AbstractString}=:tabs, hold::Bool=false,
+    function TerminalOptions(mode::Union{Symbol, AbstractString}=:tabs, hold::Bool=false,
                              launch_settle_timeout::Real=30)
         resolved_mode = Symbol(mode)
-        validate_terminal_fields(emulator, resolved_mode, launch_settle_timeout)
-        return new(String(emulator), resolved_mode, hold, Float64(launch_settle_timeout))
+        validate_terminal_fields(resolved_mode, launch_settle_timeout)
+        return new(resolved_mode, hold, Float64(launch_settle_timeout))
     end
 end
 

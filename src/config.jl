@@ -1,6 +1,6 @@
 const TOP_LEVEL_KEYS = ("globals", "terminal", "targets")
 const GLOBALS_KEYS = ("connect_timeout", "strict_host_key_checking", "log_level")
-const TERMINAL_KEYS = ("emulator", "mode", "hold", "launch_settle_timeout")
+const TERMINAL_KEYS = ("mode", "hold", "launch_settle_timeout")
 const TARGET_KEYS = ("host", "port", "user", "password", "title",
                      "strict_host_key_checking")
 
@@ -74,9 +74,7 @@ function parse_config(dict::AbstractDict)::SessionConfig
     terminal_table = typed_value(dict, "terminal", AbstractDict, Dict{String, Any}(), "")
     reject_unknown_keys(terminal_table, TERMINAL_KEYS, "[terminal]")
     terminal_defaults = TerminalOptions()
-    terminal = TerminalOptions(typed_value(terminal_table, "emulator", AbstractString,
-                                           terminal_defaults.emulator, "[terminal]"),
-                               typed_value(terminal_table, "mode", AbstractString,
+    terminal = TerminalOptions(typed_value(terminal_table, "mode", AbstractString,
                                            String(terminal_defaults.mode), "[terminal]"),
                                typed_value(terminal_table, "hold", Bool,
                                            terminal_defaults.hold, "[terminal]"),

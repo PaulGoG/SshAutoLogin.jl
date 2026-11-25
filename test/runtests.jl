@@ -212,13 +212,12 @@ end
         @test_throws ArgumentError GlobalConfig(10, "invalid_policy", "ERROR")
         @test_throws ArgumentError GlobalConfig(10, "accept-new", "UNKNOWN")
         @test_throws ArgumentError GlobalConfig(10, "accept-new", "error")
-        @test_throws ArgumentError TerminalOptions("xterm", :tabs, false)
-        @test_throws ArgumentError TerminalOptions("Konsole", :tabs, false)
-        @test_throws ArgumentError TerminalOptions("konsole", :panes, false)
-        @test_throws ArgumentError TerminalOptions("konsole", :tabs, false, 0)
-        @test_throws ArgumentError TerminalOptions("konsole", :tabs, false, Inf)
+        @test_throws ArgumentError TerminalOptions(:panes, false)
+        @test_throws ArgumentError TerminalOptions(:tabs, false, 0)
+        @test_throws ArgumentError TerminalOptions(:tabs, false, Inf)
+        @test fieldnames(TerminalOptions) == (:mode, :hold, :launch_settle_timeout)
         @test TerminalOptions().launch_settle_timeout == 30.0
-        @test TerminalOptions("konsole", "windows", true, 5).mode == :windows
+        @test TerminalOptions("windows", true, 5).mode == :windows
         @test_throws ArgumentError SessionConfig(GlobalConfig(), TerminalOptions(),
                                                  SshTarget[])
     end
@@ -243,7 +242,6 @@ end
         log_level = "DEBUG"
 
         [terminal]
-        emulator = "konsole"
         mode = "windows"
         hold = true
         launch_settle_timeout = 2.5
@@ -306,6 +304,15 @@ end
         err = captured_error(() -> parse_config(Dict{String, Any}("targets" => Any[typo])))
         @test err isa ArgumentError
         @test occursin("pasword", sprint(showerror, err))
+
+        # The emulator key is gone: Konsole is the only emulator
+        legacy_terminal = Dict{String, Any}("emulator" => "konsole")
+        err = captured_error(() -> parse_config(Dict{String, Any}("terminal" =>
+                                                                      legacy_terminal,
+                                                                  "targets" =>
+                                                                      Any[base_target])))
+        @test err isa ArgumentError
+        @test occursin("Unknown key(s) in [terminal]: emulator", sprint(showerror, err))
 
         wrong_type = merge(base_target, Dict{String, Any}("port" => "22"))
         err = captured_error(() -> parse_config(Dict{String,
@@ -469,13 +476,11 @@ end
               "title: Primary Node ;; command: /run/t1.sh\ntitle: Secondary Node ;; command: /run/t2.sh\n"
         @test_throws DimensionMismatch generate_tabs_file_content([target1], String[])
 
-        config_tabs = SessionConfig(globals, TerminalOptions("konsole", :tabs, false),
+        config_tabs = SessionConfig(globals, TerminalOptions(:tabs, false),
                                     [target1, target2])
-        @test build_tabs_launch_command(config_tabs.terminal, "/run/tabs.konsole").exec ==
+        @test build_tabs_launch_command("/run/tabs.konsole").exec ==
               ["konsole", "--separate", "--tabs-from-file", "/run/tabs.konsole"]
-        window = build_single_window_command(target1,
-                                             TerminalOptions("konsole", :windows, true),
-                                             "/run/t1.sh")
+        window = build_single_window_command(target1, "/run/t1.sh")
         @test window.exec ==
               ["konsole", "--separate", "-p", "tabtitle=Primary Node", "-e", "/run/t1.sh"]
         @test window.env === nothing
@@ -485,7 +490,7 @@ end
         plan = plan_sessions(config_tabs)
         @test length(plan) == 1
         @test plan[1].exec[end] == "<runtime-dir>/tabs.konsole"
-        config_windows = SessionConfig(globals, TerminalOptions("konsole", :windows, true),
+        config_windows = SessionConfig(globals, TerminalOptions(:windows, true),
                                        [target1, target2])
         plan_windows = plan_sessions(config_windows)
         @test length(plan_windows) == 2
@@ -527,8 +532,8 @@ end
         targets = [SshTarget("10.0.0.1", 22, "admin", "p1", "Node A"),
                    SshTarget("10.0.0.2", 22, "admin", AWKWARD_PASSWORD, "Node B")]
 
-        for terminal in (TerminalOptions("konsole", :tabs, false, 5),
-                         TerminalOptions("konsole", :windows, true, 5))
+        for terminal in (TerminalOptions(:tabs, false, 5),
+                         TerminalOptions(:windows, true, 5))
             config = SessionConfig(globals, terminal, targets)
             with_stub_environment(CONSUMING_KONSOLE) do _, runtime_dir
                 processes = launch_sessions(config)
@@ -540,8 +545,7 @@ end
         end
 
         # An emulator that exits without executing the wrappers: warning, directory removed.
-        config = SessionConfig(globals, TerminalOptions("konsole", :tabs, false, 5),
-                               targets)
+        config = SessionConfig(globals, TerminalOptions(:tabs, false, 5), targets)
         with_stub_environment(FAILING_KONSOLE) do _, runtime_dir
             logs, processes = Test.collect_test_logs() do
                 return launch_sessions(config)
@@ -557,8 +561,7 @@ end
 
         # An emulator still running when the settle timeout elapses: warning, files kept
         # with private modes, then purged by a later launch once they are stale.
-        slow_config = SessionConfig(globals, TerminalOptions("konsole", :tabs, false, 0.2),
-                                    targets)
+        slow_config = SessionConfig(globals, TerminalOptions(:tabs, false, 0.2), targets)
         with_stub_environment(SLOW_KONSOLE) do stub_dir, runtime_dir
             processes = @test_logs (:warn, r"settle timeout") match_mode=:any launch_sessions(slow_config)
             session_dir = joinpath(runtime_dir, "ssh-autologin")
@@ -578,8 +581,7 @@ end
             # removes its own directory.
             write_executable(joinpath(stub_dir, "konsole"),
                              replace(CONSUMING_KONSOLE, "sleep 0.3\n" => ""))
-            later_config = SessionConfig(globals,
-                                         TerminalOptions("konsole", :tabs, false, 1.0),
+            later_config = SessionConfig(globals, TerminalOptions(:tabs, false, 1.0),
                                          targets)
             later = launch_sessions(later_config)
             foreach(wait, later)

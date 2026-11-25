@@ -2,7 +2,6 @@ const VALID_HOST_KEY_POLICIES = ("accept-new", "yes", "no")
 const VALID_LOG_LEVELS = ("QUIET", "FATAL", "ERROR", "INFO", "VERBOSE", "DEBUG", "DEBUG1",
                           "DEBUG2", "DEBUG3")
 const VALID_TERMINAL_MODES = (:tabs, :windows)
-const VALID_TERMINAL_EMULATORS = ("konsole",)
 
 # The patterns end in \z, not $, which would also match before a final newline.
 """
@@ -101,17 +100,12 @@ function validate_global_fields(connect_timeout::Integer, host_key_policy::Abstr
 end
 
 """
-    validate_terminal_fields(emulator, mode, launch_settle_timeout)
+    validate_terminal_fields(mode, launch_settle_timeout)
 
-Validate the fields of a [`TerminalOptions`](@ref). The emulator name must match exactly,
-because it is also the executable looked up in `PATH`. Throws `ArgumentError` naming the
+Validate the fields of a [`TerminalOptions`](@ref). Throws `ArgumentError` naming the
 offending field.
 """
-function validate_terminal_fields(emulator::AbstractString, mode::Symbol,
-                                  launch_settle_timeout::Real)
-    if !(emulator in VALID_TERMINAL_EMULATORS)
-        throw(ArgumentError("Terminal 'emulator' ($(repr(emulator))) is not supported; supported emulators: $(VALID_TERMINAL_EMULATORS)."))
-    end
+function validate_terminal_fields(mode::Symbol, launch_settle_timeout::Real)
     if !(mode in VALID_TERMINAL_MODES)
         throw(ArgumentError("Terminal 'mode' (:$(mode)) must be one of $(VALID_TERMINAL_MODES)."))
     end

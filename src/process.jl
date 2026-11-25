@@ -1,7 +1,7 @@
 """
     MissingBinaryError
 
-Thrown when a required executable (`bash`, `ssh`, `sshpass`, or the terminal emulator)
+Thrown when a required executable (`bash`, `ssh`, `sshpass`, or `konsole`)
 is not found in `PATH`.
 """
 struct MissingBinaryError <: Exception
@@ -15,13 +15,13 @@ function Base.showerror(io::IO, err::MissingBinaryError)
 end
 
 """
-    check_prerequisites(terminal::TerminalOptions)
+    check_prerequisites()
 
 Throw [`MissingBinaryError`](@ref) unless `bash` (the wrapper scripts are Bash), `ssh`,
-`sshpass`, and the configured terminal emulator are all found in `PATH`.
+`sshpass`, and `konsole` are all found in `PATH`.
 """
-function check_prerequisites(terminal::TerminalOptions)
-    required = ["bash", "ssh", "sshpass", terminal.emulator]
+function check_prerequisites()
+    required = ["bash", "ssh", "sshpass", KONSOLE]
     missing_binaries = filter(name -> Sys.which(name) === nothing, required)
     isempty(missing_binaries) || throw(MissingBinaryError(missing_binaries))
     return nothing
@@ -45,6 +45,8 @@ Render the argument vector of `cmd` as a POSIX-shell-quoted string. The environm
 """
 command_string(cmd::Cmd)::String = Base.shell_escape_posixly(cmd.exec...)
 
+# Executable of the terminal emulator.
+const KONSOLE = "konsole"
 const LAUNCH_PREFIX = "launch-"
 const TABS_FILE = "tabs.konsole"
 
@@ -160,29 +162,26 @@ function generate_tabs_file_content(targets::AbstractVector{SshTarget},
 end
 
 """
-    build_tabs_launch_command(terminal::TerminalOptions, tabs_file_path::AbstractString)::Cmd
+    build_tabs_launch_command(tabs_file_path::AbstractString)::Cmd
 
 Return the command that opens one emulator window with all tabs described in
 `tabs_file_path`. `--separate` runs Konsole in its own process instead of handing the
 request to a running instance, so the returned process is the emulator itself and its
 exit is visible to the settle wait.
 """
-function build_tabs_launch_command(terminal::TerminalOptions,
-                                   tabs_file_path::AbstractString)::Cmd
-    return Cmd(String[terminal.emulator, "--separate", "--tabs-from-file", tabs_file_path])
+function build_tabs_launch_command(tabs_file_path::AbstractString)::Cmd
+    return Cmd(String[KONSOLE, "--separate", "--tabs-from-file", tabs_file_path])
 end
 
 """
-    build_single_window_command(target::SshTarget, terminal::TerminalOptions,
-                                wrapper_path::AbstractString)::Cmd
+    build_single_window_command(target::SshTarget, wrapper_path::AbstractString)::Cmd
 
 Return the command that opens a separate emulator window running the wrapper script of
 `target`, with `--separate` as in [`build_tabs_launch_command`](@ref).
 """
-function build_single_window_command(target::SshTarget, terminal::TerminalOptions,
-                                     wrapper_path::AbstractString)::Cmd
-    return Cmd(String[terminal.emulator, "--separate", "-p", "tabtitle=$(target.title)",
-                      "-e", wrapper_path])
+function build_single_window_command(target::SshTarget, wrapper_path::AbstractString)::Cmd
+    return Cmd(String[KONSOLE, "--separate", "-p", "tabtitle=$(target.title)", "-e",
+                      wrapper_path])
 end
 
 """
@@ -192,11 +191,10 @@ The emulator commands of a launch whose files live in `directory`: one tabs comm
 one window command per target.
 """
 function emulator_commands(config::SessionConfig, directory::AbstractString)::Vector{Cmd}
-    terminal = config.terminal
-    if terminal.mode == :tabs
-        return Cmd[build_tabs_launch_command(terminal, joinpath(directory, TABS_FILE))]
+    if config.terminal.mode == :tabs
+        return Cmd[build_tabs_launch_command(joinpath(directory, TABS_FILE))]
     end
-    return Cmd[build_single_window_command(target, terminal,
+    return Cmd[build_single_window_command(target,
                                            joinpath(directory, wrapper_name(index)))
                for (index, target) in enumerate(config.targets)]
 end
@@ -293,7 +291,7 @@ while an emulator is still running, the directory is kept, with a warning, and a
 launch purges it.
 """
 function launch_sessions(config::SessionConfig)::Vector{Base.Process}
-    check_prerequisites(config.terminal)
+    check_prerequisites()
     base = runtime_directory()
     purge_stale_launches!(base, config.terminal.launch_settle_timeout)
     directory = mktempdir(base; prefix=LAUNCH_PREFIX, cleanup=false)
@@ -301,10 +299,10 @@ function launch_sessions(config::SessionConfig)::Vector{Base.Process}
     if config.terminal.mode == :tabs
         write_private_file(joinpath(directory, TABS_FILE),
                            generate_tabs_file_content(config.targets, wrapper_paths), 0o600)
-        @info "Launching terminal window" emulator=config.terminal.emulator tabs=length(config.targets)
+        @info "Launching terminal window" tabs=length(config.targets)
     else
         for target in config.targets
-            @info "Launching terminal window" emulator=config.terminal.emulator host=target.host port=target.port user=target.user title=target.title
+            @info "Launching terminal window" host=target.host port=target.port user=target.user title=target.title
         end
     end
     processes = Base.Process[start_emulator(cmd)

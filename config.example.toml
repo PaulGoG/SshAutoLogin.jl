@@ -11,9 +11,6 @@ strict_host_key_checking = "accept-new"  # one of: "accept-new" | "yes" | "no"
 log_level = "ERROR"  # one of: "QUIET" | "FATAL" | "ERROR" | "INFO" | "VERBOSE" | "DEBUG" | "DEBUG1" | "DEBUG2" | "DEBUG3"
 
 [terminal]
-# Terminal emulator executable
-emulator = "konsole"  # one of: "konsole"
-
 # Window layout
 mode = "tabs"  # one of: "tabs" | "windows"
 
