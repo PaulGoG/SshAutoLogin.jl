@@ -80,6 +80,83 @@ function captured_error(f)
     return nothing
 end
 
+const DRIVER = joinpath(dirname(@__DIR__), "scripts", "run.jl")
+
+# Distinctive, so that the scenarios can assert it never appears in any output.
+const SCENARIO_PASSWORD = "scenario-password-never-printed"
+
+"""
+    scenario_config(mode)
+
+Configuration text with two targets, opened in terminal `mode` (`"tabs"` or `"windows"`).
+"""
+scenario_config(mode::AbstractString) = """
+[globals]
+connect_timeout = 5
+strict_host_key_checking = "accept-new"
+log_level = "ERROR"
+
+[terminal]
+mode = "$(mode)"
+hold = false
+launch_settle_timeout = 5
+
+[[targets]]
+host = "192.0.2.10"
+port = 22
+user = "researcher"
+password = "$(SCENARIO_PASSWORD)"
+title = "Scenario node 01"
+
+[[targets]]
+host = "192.0.2.11"
+port = 2222
+user = "researcher"
+password = "$(SCENARIO_PASSWORD)"
+title = "Scenario node 02"
+"""
+
+# A misspelled key must be refused before anything is launched.
+const MALFORMED_CONFIG = """
+[globals]
+connect_timeoutt = 5
+
+[[targets]]
+host = "192.0.2.10"
+port = 22
+user = "researcher"
+password = "$(SCENARIO_PASSWORD)"
+"""
+
+"""
+    invoke_driver(arguments; spawn = false)
+
+Run the driver with `arguments`, capturing both streams in one buffer. The call is made
+in process through `SshAutoLogin.main`; with `spawn = true` a separate Julia process runs
+`scripts/run.jl` instead, which verifies the script wrapper itself.
+Returns `(; exitcode, output)`.
+"""
+function invoke_driver(arguments::Vector{String}; spawn::Bool=false)
+    buffer = IOBuffer()
+    exitcode = if spawn
+        # Pkg.test exports a load path without the standard libraries; the driver
+        # activates its own environment and must not inherit it.
+        command = addenv(`$(Base.julia_cmd()) --startup-file=no $(DRIVER) $(arguments)`,
+                         "JULIA_LOAD_PATH" => nothing, "JULIA_PROJECT" => nothing)
+        # Both streams go to one pipe, read to end-of-file: on Julia 1.10 a buffer handed
+        # to pipeline may still be filling when run returns.
+        pipe = Pipe()
+        process = run(pipeline(ignorestatus(command); stdout=pipe, stderr=pipe); wait=false)
+        close(pipe.in)
+        write(buffer, read(pipe))
+        wait(process)
+        process.exitcode
+    else
+        SshAutoLogin.main(arguments; io=buffer, err=buffer)
+    end
+    return (; exitcode, output=String(take!(buffer)))
+end
+
 @testset "SshAutoLogin.jl" begin
     @testset "Static analysis" begin
         Aqua.test_all(SshAutoLogin)
@@ -563,14 +640,58 @@ end
         end
     end
 
-    @testset "Command-line interface (sandbox)" begin
-        include(joinpath(dirname(@__DIR__), "sandbox", "run.jl"))
-        results = run_sandbox(; verbose=false)
-        @test !isempty(results)
-        for result in results
-            @test result.exitcode == result.expected
-            @test !result.leaked
-            @test isempty(result.missing_fragments)
+    @testset "Command-line scenarios" begin
+        with_stub_environment(CONSUMING_KONSOLE) do _, _
+            mktempdir() do dir
+                configs = Dict{String, String}()
+                for (key, text) in ("tabs" => scenario_config("tabs"),
+                                    "windows" => scenario_config("windows"),
+                                    "malformed" => MALFORMED_CONFIG)
+                    path = joinpath(dir, "config_$(key).toml")
+                    write(path, text)
+                    chmod(path, 0o600)
+                    configs[key] = path
+                end
+                configs["missing"] = joinpath(dir, "does_not_exist.toml")
+
+                scenarios = [(; arguments=["--config", configs["tabs"], "--dry-run"],
+                              expected=0,
+                              fragments=["konsole --separate --tabs-from-file",
+                                         "<runtime-dir>/tabs.konsole"],
+                              spawn=false,
+                              description="a dry run prints the emulator command"),
+                             (; arguments=["--config", configs["tabs"]], expected=0,
+                              fragments=["Sessions dispatched", "emulator_processes = 1"],
+                              spawn=false, description="tabs mode launches one window"),
+                             (; arguments=["--config", configs["windows"]], expected=0,
+                              fragments=["Sessions dispatched", "emulator_processes = 2"],
+                              spawn=false,
+                              description="windows mode launches one per target"),
+                             (; arguments=["--config", configs["malformed"]], expected=1,
+                              fragments=["connect_timeoutt"], spawn=false,
+                              description="a misspelled key is refused"),
+                             (; arguments=["--config", configs["missing"]], expected=1,
+                              fragments=["configuration file not found"], spawn=false,
+                              description="a missing file is reported"),
+                             (; arguments=["--bogus"], expected=1,
+                              fragments=["unrecognized option '--bogus'"], spawn=false,
+                              description="an unknown option is rejected"),
+                             (; arguments=["--config", configs["tabs"]], expected=0,
+                              fragments=["Sessions dispatched", "emulator_processes = 1"],
+                              spawn=true,
+                              description="scripts/run.jl forwards the arguments and the exit status")]
+
+                for scenario in scenarios
+                    @testset "$(scenario.description)" begin
+                        outcome = invoke_driver(scenario.arguments; spawn=scenario.spawn)
+                        @test outcome.exitcode == scenario.expected
+                        @test !occursin(SCENARIO_PASSWORD, outcome.output)
+                        for fragment in scenario.fragments
+                            @test occursin(fragment, outcome.output)
+                        end
+                    end
+                end
+            end
         end
     end
 end
