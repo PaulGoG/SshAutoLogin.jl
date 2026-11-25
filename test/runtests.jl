@@ -438,12 +438,21 @@ end
                 false
             end
             searchable && @test_skip "configuration file in an unsearchable directory"
-            for path in (searchable ? [loop] : [loop, inside])
-                @test_throws ArgumentError load_config(path)
+            cases = searchable ? [(loop, Libc.ELOOP)] :
+                    [(loop, Libc.ELOOP), (inside, Libc.EACCES)]
+            for (path, errno) in cases
+                @test captured_error(() -> load_config(path)) isa ArgumentError
+                causes = try
+                    load_config(path)
+                    0
+                catch
+                    length(current_exceptions())
+                end
+                @test causes == 1
                 err = IOBuffer()
                 @test SshAutoLogin.main([path]; io=IOBuffer(), err=err) == 1
                 message = String(take!(err))
-                @test occursin("cannot be read: ", message)
+                @test occursin("cannot be read: $(Libc.strerror(errno)).", message)
                 @test !occursin("IOError", message)
             end
             chmod(locked, 0o700)
@@ -742,9 +751,11 @@ end
                         # A launch that left wrappers behind warns and keeps or removes
                         # its directory; a completed one does neither.
                         # Checked after every scenario, before a later launch can purge
-                        # a directory left behind.
+                        # a directory left behind. The warning is matched by its text:
+                        # the spawned driver may also print warnings of Pkg about the
+                        # manifest of the checkout.
                         if scenario.expected == 0
-                            @test !occursin("Warning", outcome.output)
+                            @test !occursin("every wrapper script", outcome.output)
                         end
                         launches = joinpath(runtime_dir, "ssh-autologin")
                         @test !isdir(launches) || isempty(readdir(launches))
