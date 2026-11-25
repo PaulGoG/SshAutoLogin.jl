@@ -91,8 +91,10 @@ struct TerminalOptions
     function TerminalOptions(mode::Union{Symbol, AbstractString}=:tabs, hold::Bool=false,
                              launch_settle_timeout::Real=30)
         resolved_mode = Symbol(mode)
-        validate_terminal_fields(resolved_mode, launch_settle_timeout)
-        return new(resolved_mode, hold, Float64(launch_settle_timeout))
+        # Validated after the conversion: a huge or tiny Real becomes Inf or 0.0 here.
+        timeout = Float64(launch_settle_timeout)
+        validate_terminal_fields(resolved_mode, timeout)
+        return new(resolved_mode, hold, timeout)
     end
 end
 

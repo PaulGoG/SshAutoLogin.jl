@@ -128,12 +128,35 @@ function syntax_error_line(err::TOML.ParserError)::Int
 end
 
 """
+    config_file_present(path::AbstractString)::Bool
+
+Whether `path` names a regular file. A path that cannot be inspected, because a directory
+on it is not searchable or it ends in a loop of symbolic links, raises `ArgumentError`
+with the reason.
+"""
+function config_file_present(path::AbstractString)::Bool
+    failure = nothing
+    present = try
+        isfile(path)
+    catch err
+        err isa Base.IOError || rethrow()
+        failure = err
+        false
+    end
+    # libuv reports an error as the negated errno on Unix.
+    if failure !== nothing
+        throw(ArgumentError("Configuration file '$(path)' cannot be read: $(Libc.strerror(-failure.code))."))
+    end
+    return present
+end
+
+"""
     load_config(path::AbstractString)::SessionConfig
 
 Read a TOML configuration file and return the validated [`SessionConfig`](@ref).
-Throws `ArgumentError` if the file is missing, grants any permission to group or others
-(it holds passwords; use mode 600), cannot be read, is not valid TOML, or violates the
-schema. A syntax error is reported by its kind and line number only: the offending line
+Throws `ArgumentError` if the file is missing, lies on a path that cannot be inspected,
+grants any permission to group or others (it holds passwords; use mode 600), cannot be
+read, is not valid TOML, or violates the schema. A syntax error is reported by its kind and line number only: the offending line
 may be the password line and is never printed.
 
 # Example
@@ -142,7 +165,7 @@ config = load_config("config.toml")
 ```
 """
 function load_config(path::AbstractString)::SessionConfig
-    if !isfile(path)
+    if !config_file_present(path)
         throw(ArgumentError("Configuration file not found: $(path)"))
     end
     mode = filemode(path) & 0o777

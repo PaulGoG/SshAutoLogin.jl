@@ -215,6 +215,9 @@ end
         @test_throws ArgumentError TerminalOptions(:panes, false)
         @test_throws ArgumentError TerminalOptions(:tabs, false, 0)
         @test_throws ArgumentError TerminalOptions(:tabs, false, Inf)
+        # A Real that is finite but beyond Float64, or positive but below it, is refused
+        @test_throws ArgumentError TerminalOptions(:tabs, false, big(10)^309)
+        @test_throws ArgumentError TerminalOptions(:tabs, false, big"1e-400")
         @test fieldnames(TerminalOptions) == (:mode, :hold, :launch_settle_timeout)
         @test TerminalOptions().launch_settle_timeout == 30.0
         @test TerminalOptions("windows", true, 5).mode == :windows
@@ -396,23 +399,54 @@ end
         mktemp() do path, io
             close(io)
             chmod(path, 0o000)
-            readable = try
+            denied = try
                 open(close, path)
-                true
+                nothing
             catch err
                 err isa SystemError || rethrow()
-                false
+                err
             end
-            if readable
+            if denied === nothing
                 @test_skip "unreadable configuration file"
             else
                 @test_throws ArgumentError load_config(path)
                 err = IOBuffer()
                 @test SshAutoLogin.main([path]; io=IOBuffer(), err=err) == 1
                 message = String(take!(err))
-                @test occursin("cannot be read: Permission denied.", message)
+                # The reason is the C library's text, in the locale of the process
+                @test occursin("cannot be read: $(Libc.strerror(denied.errnum)).", message)
                 @test !occursin("SystemError", message)
             end
+        end
+        # A path that cannot be inspected is a configuration error as well: a loop of
+        # symbolic links, and a file in a directory that is not searchable (skipped for
+        # root, which searches any directory).
+        mktempdir() do dir
+            loop = joinpath(dir, "loop.toml")
+            symlink(loop, loop)
+            locked = joinpath(dir, "locked")
+            mkdir(locked)
+            inside = joinpath(locked, "config.toml")
+            write(inside, "")
+            chmod(inside, 0o600)
+            chmod(locked, 0o000)
+            searchable = try
+                isfile(joinpath(locked, "absent"))
+                true
+            catch err
+                err isa Base.IOError || rethrow()
+                false
+            end
+            searchable && @test_skip "configuration file in an unsearchable directory"
+            for path in (searchable ? [loop] : [loop, inside])
+                @test_throws ArgumentError load_config(path)
+                err = IOBuffer()
+                @test SshAutoLogin.main([path]; io=IOBuffer(), err=err) == 1
+                message = String(take!(err))
+                @test occursin("cannot be read: ", message)
+                @test !occursin("IOError", message)
+            end
+            chmod(locked, 0o700)
         end
         @test_throws ArgumentError load_config(joinpath(tempdir(), "does-not-exist.toml"))
 
@@ -592,8 +626,18 @@ end
             @test isempty(readdir(session_dir))
         end
 
-        # A timeout beyond the range of a nanosecond counter is still a valid wait.
+        # A timeout beyond the range of a nanosecond counter is still a valid wait: the
+        # launch waits for the stub, which consumes the wrappers after 0.3 s.
         @test SshAutoLogin.await_wrapper_consumption(String[], Base.Process[], 1.0e12)
+        long_config = SessionConfig(globals, TerminalOptions(:tabs, false, 1.0e12), targets)
+        with_stub_environment(CONSUMING_KONSOLE) do _, runtime_dir
+            logs, processes = Test.collect_test_logs() do
+                return launch_sessions(long_config)
+            end
+            foreach(wait, processes)
+            @test !any(log -> log.level == Base.CoreLogging.Warn, logs)
+            @test isempty(readdir(joinpath(runtime_dir, "ssh-autologin")))
+        end
 
         mktempdir() do empty_dir
             withenv("PATH" => empty_dir) do
@@ -697,13 +741,33 @@ end
                         end
                         # A launch that left wrappers behind warns and keeps or removes
                         # its directory; a completed one does neither.
+                        # Checked after every scenario, before a later launch can purge
+                        # a directory left behind.
                         if scenario.expected == 0
                             @test !occursin("Warning", outcome.output)
                         end
+                        launches = joinpath(runtime_dir, "ssh-autologin")
+                        @test !isdir(launches) || isempty(readdir(launches))
                     end
                 end
-                launches = joinpath(runtime_dir, "ssh-autologin")
-                @test !isdir(launches) || isempty(readdir(launches))
+
+                # A launch failure is reported by the driver, without the exception type
+                err = IOBuffer()
+                withenv("XDG_RUNTIME_DIR" => nothing) do
+                    @test SshAutoLogin.main([configs["tabs"]]; io=IOBuffer(), err=err) == 1
+                end
+                message = String(take!(err))
+                @test occursin("Error: ", message) && occursin("XDG_RUNTIME_DIR", message)
+                @test !occursin("ArgumentError", message)
+                mktempdir() do empty_dir
+                    withenv("PATH" => empty_dir) do
+                        @test SshAutoLogin.main([configs["tabs"]]; io=IOBuffer(),
+                                                err=err) == 1
+                    end
+                end
+                message = String(take!(err))
+                @test occursin("Required system binaries not found", message)
+                @test !occursin("MissingBinaryError", message)
             end
         end
     end
