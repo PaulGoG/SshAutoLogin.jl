@@ -4,6 +4,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-25
+
 ### Fixed
 
 - A TOML syntax error on a `password` line printed that line, password included, in the error message. A syntax error is now reported by its kind and line number, without the line.
@@ -79,7 +81,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 - Command-line entry point `scripts/run.jl` with `--config` and `--dry-run`.
 - Test suite with Aqua, JET, ExplicitImports, and launch tests against a stub emulator; formatting enforced by a dedicated `format/` environment and CI job.
 
-[Unreleased]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.1.0...v0.2.0
