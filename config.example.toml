@@ -21,19 +21,22 @@ hold = false
 launch_settle_timeout = 30  # finite number > 0; units: s
 
 [[targets]]
-# Host name, IPv4 address, or IPv6 literal
+# Host name, ssh_config Host alias, IPv4 address, or IPv6 literal
 host = "192.168.1.100"
 
-# SSH daemon port
+# SSH daemon port (optional; when absent, ~/.ssh/config or 22)
 port = 22  # integer in [1, 65535]
 
-# Remote account name
+# Remote account name (optional; when absent, ~/.ssh/config or the local account name)
 user = "admin"  # letter or underscore, then letters, digits, '.', '_', '-'; at most 32 characters
 
-# Authentication password
+# Authentication method (optional; default "password")
+auth = "password"  # one of: "password" | "key"
+
+# Authentication password (password targets only)
 password = "example_password_1"  # non-empty; no control characters
 
-# Tab or window title (optional; default: user@host:port; no control characters, ';', or '%')
+# Tab or window title (optional; default: [user@]host[:port]; no control characters, ';', or '%')
 title = "Cluster Node 01"
 
 # Host-key policy override for this target (optional)
@@ -45,3 +48,14 @@ port = 2222
 user = "developer"
 password = "example_password_2"
 title = "Dev Gateway"
+
+[[targets]]
+host = "hpc"
+auth = "key"
+
+# Private key offered alone (optional, key targets only; absolute or starting with '~';
+# a regular file of mode 600, checked when the configuration is loaded)
+# identity_file = "~/.ssh/id_ed25519_hpc"
+
+# Jump hosts passed as ssh -J (optional, key targets only)
+proxy_jump = "admin@gateway.example.org"  # [user@]host[:port] hops separated by ','; IPv6 in brackets; or "none"

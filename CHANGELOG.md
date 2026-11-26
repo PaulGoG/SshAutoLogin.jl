@@ -4,6 +4,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+### Added
+
+- Key-based targets: `auth = "key"` opens the session with whatever `ssh` authenticates by itself (agent, identity file, certificate, master connection), and a key passphrase or a second factor is answered in the tab. The wrapper of such a target holds no secret and runs `ssh` without `sshpass`. `auth = "password"` is the default and behaves as before.
+- `host` may be a Host alias of `~/.ssh/config`; host names may contain `_`.
+- `identity_file` and `proxy_jump` for key targets, passed as `-i <path> -o IdentitiesOnly=yes` and `-J`. The identity file must be an absolute regular file without group or other permissions; a jump specification is checked hop by hop, and `none` disables a `ProxyJump` of `~/.ssh/config`. Both keys are refused on password targets, where `sshpass` would answer a jump host's password prompt with the target's password.
+
+### Changed
+
+- `port` and `user` are optional. A key left out is not passed to `ssh`, so `~/.ssh/config` decides; the default title then shows only the parts that are set.
+- `sshpass` is required only when the configuration holds a password target.
+- **Breaking** for library use: `SshTarget` has the fields `auth`, `identity_file`, and `proxy_jump`, and `port`, `user`, and `password` may be `nothing`. The keyword constructor `SshTarget(host; ...)` takes every field; the positional constructor still builds a password target.
+
 ## [0.4.0] - 2026-11-25
 
 ### Fixed
