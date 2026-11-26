@@ -27,10 +27,12 @@ One remote SSH endpoint.
   certificate, or an existing master connection, as ~/.ssh/config provides).
 - `password::Union{Nothing, String}`: authentication password, set for `:password` only;
   never rendered by `show`.
-- `identity_file::Union{Nothing, String}`: absolute path of a private key, `~` expanded,
-  for `:key` only; offered alone (`-i <path> -o IdentitiesOnly=yes`).
+- `identity_file::Union{Nothing, String}`: absolute path of a private key, or of a
+  public key selecting an agent key, a leading `~/` expanded, for `:key` only; passed as
+  `-i <path> -o IdentitiesOnly=yes`, so that no agent key outside the configured identity
+  files is offered.
 - `proxy_jump::Union{Nothing, String}`: `ssh -J` jump-host specification, for `:key`
-  only.
+  only, or `"none"` (any target) to connect directly whatever ~/.ssh/config routes.
 - `title::String`: terminal tab or window title; defaults to `[user@]host[:port]`.
 - `strict_host_key_checking::Union{Nothing, String}`: per-target host-key policy
   override, or `nothing` to inherit the global policy.
@@ -69,8 +71,14 @@ struct SshTarget
                        proxy_jump::Union{Nothing, AbstractString}=nothing,
                        title::AbstractString="",
                        strict_host_key_checking::Union{Nothing, AbstractString}=nothing)
+        # A string is compared before Symbol(), which throws on a NUL byte without naming the key
+        if auth isa AbstractString && !(auth in ("password", "key"))
+            throw(ArgumentError("SSH target 'auth' ($(repr(auth))) for $(target_label(host, user)) must be one of \"password\" or \"key\"."))
+        end
         method = Symbol(auth)
-        key_path = identity_file === nothing ? nothing : expanduser(identity_file)
+        # A password target is refused for having identity_file at all, whatever its form
+        key_path = identity_file === nothing || method != :key ? identity_file :
+                   expand_identity_file(identity_file)
         validate_target_fields(host, port, user, method, password, key_path, proxy_jump,
                                title, strict_host_key_checking)
         resolved_title = isempty(title) ? default_title(host, port, user) : String(title)

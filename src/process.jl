@@ -107,6 +107,10 @@ an encrypted key cannot trigger a passphrase prompt that `sshpass` does not answ
 For `auth = :key`, no method is pinned: `ssh` proceeds as ~/.ssh/config directs, and any
 prompt (key passphrase, second factor) is answered in the tab. A set `identity_file` is
 passed as `-i <path> -o IdentitiesOnly=yes`, a set `proxy_jump` as `-J <spec>`.
+
+`proxy_jump = "none"`, the one value a password target admits, is passed as
+`-o ProxyCommand=none`, which overrides both a `ProxyJump` and a `ProxyCommand` of
+~/.ssh/config (`-J none` overrides only the former).
 """
 function ssh_arguments(target::SshTarget, globals::GlobalConfig)::Vector{String}
     policy = resolve_host_key_policy(target, globals)
@@ -121,11 +125,13 @@ function ssh_arguments(target::SshTarget, globals::GlobalConfig)::Vector{String}
                 ("-o", "PubkeyAuthentication=no", "-o",
                  "PreferredAuthentications=keyboard-interactive,password", "-o",
                  "NumberOfPasswordPrompts=1"))
-    else
-        if target.identity_file !== nothing
-            append!(arguments, ("-i", target.identity_file, "-o", "IdentitiesOnly=yes"))
-        end
-        target.proxy_jump === nothing || append!(arguments, ("-J", target.proxy_jump))
+    elseif target.identity_file !== nothing
+        append!(arguments, ("-i", target.identity_file, "-o", "IdentitiesOnly=yes"))
+    end
+    if target.proxy_jump == "none"
+        append!(arguments, ("-o", "ProxyCommand=none"))
+    elseif target.proxy_jump !== nothing
+        append!(arguments, ("-J", target.proxy_jump))
     end
     push!(arguments, target_label(target.host, target.user))
     return arguments

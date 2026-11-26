@@ -66,15 +66,19 @@ end
 
 Return whether `spec` is a jump-host specification accepted for `ssh -J`: one or more
 `[user@]host[:port]` hops separated by commas, an IPv6 host enclosed in square brackets,
-or exactly `none`, which disables a `ProxyJump` set in ~/.ssh/config. Each user must be a
-valid account name, each host a valid host name, alias, or IPv4 address (an IPv6 literal
-only in brackets), and each port lie in `1:65535`. Empty specifications and hops,
-control characters, and `ssh://` URIs are refused.
+or exactly `none`, which disables a `ProxyJump` or `ProxyCommand` set in ~/.ssh/config.
+Each user must be a valid account name, each host a valid host name, alias, or IPv4
+address (an IPv6 literal only in brackets), and each port lie in `1:65535`. Empty
+specifications and hops, control characters, and `ssh://` URIs are refused. A bracketed
+IPv6 host is accepted in the last hop only: OpenSSH hands the hops before the last to
+`/bin/sh` unquoted, inside the command it builds for the last jump host, and the shell
+would read the brackets as a glob pattern.
 """
 function is_valid_proxy_jump(spec::AbstractString)::Bool
     spec == "none" && return true
     occursin(CONTROL_CHARACTER_PATTERN, spec) && return false
-    for hop in split(spec, ',')
+    hops = split(spec, ',')
+    for (index, hop) in enumerate(hops)
         m = match(PROXY_JUMP_HOP_PATTERN, hop)
         m === nothing && return false
         user = m[:user]
@@ -84,6 +88,7 @@ function is_valid_proxy_jump(spec::AbstractString)::Bool
         # The host group is not optional: it captured whenever the hop matched.
         host = m[:host]::AbstractString
         if startswith(host, '[')
+            index == length(hops) || return false
             occursin(IPV6_PATTERN, chop(host; head=1, tail=1)) || return false
         elseif occursin(':', host) || !is_valid_host(host)
             return false
@@ -98,16 +103,36 @@ function is_valid_proxy_jump(spec::AbstractString)::Bool
 end
 
 """
+    expand_identity_file(path::AbstractString)::String
+
+Expand a leading `~` of `path` to the home directory, as `expanduser` does. A path that
+starts with `~` followed by anything but `/` (`~user/...`) is refused with an
+`ArgumentError` naming the key, since only the own home directory is expanded.
+"""
+function expand_identity_file(path::AbstractString)::String
+    if startswith(path, '~') && !(path == "~" || startswith(path, "~/"))
+        throw(ArgumentError("SSH target 'identity_file' ($(repr(path))) may start with '~/', but not with '~user': only the own home directory is expanded."))
+    end
+    return expanduser(path)
+end
+
+"""
     validate_identity_file(path::AbstractString)
 
-Check that `path`, already passed through `expanduser`, names a private key that `ssh`
-accepts: free of control characters, absolute, a regular file, and inaccessible to group
-and others. The file content is never read. Returns `nothing`; throws `ArgumentError`
-naming the violated condition, also when the path cannot be inspected.
+Check that `path`, already expanded by [`expand_identity_file`](@ref), names a key file
+that `ssh` will open as given: free of control characters, of `%` and `\$`, which `ssh`
+expands in an identity path (`%d`, `\${HOME}`) after the check made here, absolute, and a
+regular file. A private key must have no group or other permission bits, which `ssh`
+refuses for a key of its owner; a public key (`.pub`), which selects the key of an agent
+or a security token, is exempt. The file content is never read. Returns `nothing`; throws
+`ArgumentError` naming the violated condition, also when the path cannot be inspected.
 """
 function validate_identity_file(path::AbstractString)
     if occursin(CONTROL_CHARACTER_PATTERN, path)
         throw(ArgumentError("SSH target 'identity_file' must not contain control characters."))
+    end
+    if occursin('%', path) || occursin('$', path)
+        throw(ArgumentError("SSH target 'identity_file' ($(repr(path))) must not contain '%' or '\$': ssh expands them in an identity path and would open another file."))
     end
     if !startswith(path, '/')
         throw(ArgumentError("SSH target 'identity_file' ($(repr(path))) must be an absolute path or start with '~'."))
@@ -129,7 +154,7 @@ function validate_identity_file(path::AbstractString)
         throw(ArgumentError("SSH target 'identity_file' ($(repr(path))) is not a regular file."))
     end
     mode = filemode(path) & 0o777
-    if mode & 0o077 != 0
+    if !endswith(path, ".pub") && mode & 0o077 != 0
         throw(ArgumentError("SSH target 'identity_file' ($(repr(path))) is accessible to group or others (mode $(string(mode; base=8, pad=3))); ssh refuses such a private key: chmod 600 $(repr(path))"))
     end
     return nothing
@@ -141,8 +166,8 @@ end
 
 Validate the fields of an [`SshTarget`](@ref). `port` and `user` are checked only when
 set. `auth` must be `:password` or `:key`. A password target requires a non-empty
-`password` free of control characters and admits neither `identity_file` nor
-`proxy_jump`; a key target admits no `password`, an `identity_file` that passes
+`password` free of control characters, admits no `identity_file`, and admits
+`proxy_jump` only as `"none"`; a key target admits no `password`, an `identity_file` that passes
 [`validate_identity_file`](@ref), and a `proxy_jump` that passes
 [`is_valid_proxy_jump`](@ref). Throws `ArgumentError` naming the offending field. Error
 messages never contain the password.
@@ -180,8 +205,8 @@ function validate_target_fields(host::AbstractString, port::Union{Nothing, Integ
         if identity_file !== nothing
             throw(ArgumentError("SSH target 'identity_file' for $(label) applies to auth = \"key\" only."))
         end
-        if proxy_jump !== nothing
-            throw(ArgumentError("SSH target 'proxy_jump' for $(label) is not available with auth = \"password\": sshpass answers the first password prompt it sees, and a jump host asking for a password would receive the target's password. Use auth = \"key\"."))
+        if proxy_jump !== nothing && proxy_jump != "none"
+            throw(ArgumentError("SSH target 'proxy_jump' for $(label) is not available with auth = \"password\" except as \"none\": sshpass answers the first password prompt it sees, and a jump host asking for a password would receive the target's password. Use auth = \"key\"."))
         end
     else
         if password !== nothing
@@ -189,7 +214,7 @@ function validate_target_fields(host::AbstractString, port::Union{Nothing, Integ
         end
         identity_file === nothing || validate_identity_file(identity_file)
         if proxy_jump !== nothing && !is_valid_proxy_jump(proxy_jump)
-            throw(ArgumentError("SSH target 'proxy_jump' ($(repr(proxy_jump))) for $(label) must be one or more [user@]host[:port] hops separated by commas, IPv6 addresses in brackets, or \"none\"."))
+            throw(ArgumentError("SSH target 'proxy_jump' ($(repr(proxy_jump))) for $(label) must be one or more [user@]host[:port] hops separated by commas, an IPv6 address in brackets only in the last hop, or \"none\"."))
         end
     end
     if occursin(CONTROL_CHARACTER_PATTERN, title) || occursin(';', title) ||

@@ -304,20 +304,67 @@ end
             group_key = write_identity_file(joinpath(dir, "id_group"); mode=0o640)
             @test refused_with(() -> SshTarget("hpc"; auth=:key, identity_file=group_key),
                                "chmod 600")
+            other_key = write_identity_file(joinpath(dir, "id_other"); mode=0o604)
+            @test refused_with(() -> SshTarget("hpc"; auth=:key, identity_file=other_key),
+                               "chmod 600")
+            for mode in (0o400, 0o700)
+                strict_key = write_identity_file(joinpath(dir,
+                                                          "id_$(string(mode; base=8))");
+                                                 mode)
+                @test SshTarget("hpc"; auth=:key, identity_file=strict_key).identity_file ==
+                      strict_key
+            end
+            # A public key selecting an agent key may be readable by others, as ssh allows
+            public_key = write_identity_file(joinpath(dir, "id_agent.pub"); mode=0o644)
+            @test SshTarget("hpc"; auth=:key, identity_file=public_key).identity_file ==
+                  public_key
+
+            # ssh expands '%' tokens and ${VAR} in an identity path after the check here
+            for name in ("id%d", "id%%x", "id\${HOME}", "id\$x")
+                expanded = write_identity_file(joinpath(dir, name))
+                @test refused_with(() -> SshTarget("hpc"; auth=:key,
+                                                   identity_file=expanded),
+                                   "'identity_file'", "'%' or '\$'")
+            end
+
+            # '~user' is not expanded; the message names the key
+            @test refused_with(() -> SshTarget("hpc"; auth=:key, identity_file="~root/id"),
+                               "'identity_file'", "~user")
+            @test refused_with(() -> SshTarget("hpc"; password="x",
+                                               identity_file="~root/id"),
+                               "'identity_file'", "auth = \"key\" only")
+
+            # A path that cannot be inspected is reported by its reason
+            loop = joinpath(dir, "loop")
+            symlink(loop * "2", loop)
+            symlink(loop, loop * "2")
+            @test refused_with(() -> SshTarget("hpc"; auth=:key, identity_file=loop),
+                               "'identity_file'", "cannot be inspected")
         end
+
+        # An auth string is compared before it becomes a Symbol
+        @test refused_with(() -> SshTarget("hpc"; auth="key\0"), "'auth'")
 
         # ProxyJump specifications
         for spec in ("none", "gateway.example.org", "admin@gateway.example.org",
                      "admin@gateway.example.org:2222",
                      "gw1.example.org,admin@gw2.example.org:2200", "[2001:db8::1]",
-                     "admin@[2001:db8::1]:22", "gw_alias")
+                     "admin@[2001:db8::1]:22", "gw_alias", "gw.example.org,[2001:db8::1]")
             @test is_valid_proxy_jump(spec)
         end
+        # Brackets before the last hop reach /bin/sh unquoted, where they are a glob
         for spec in ("", "gw1,,gw2", "gw1,", "-oProxyCommand=x", "admin@", "@gw", "gw:0",
                      "gw:65536", "gw:22x", "ssh://gw.example.org", "2001:db8::1",
-                     "bad user@gw", "gw\n", "[not-ipv6]", "a@b@c")
+                     "bad user@gw", "gw\n", "[not-ipv6]", "a@b@c", "[2001:db8::1],gw",
+                     "admin@[2001:db8::1]:22,gw1,gw2")
             @test !is_valid_proxy_jump(spec)
         end
+        @test refused_with(() -> SshTarget("hpc"; auth=:key, proxy_jump="[::1],gw"),
+                           "'proxy_jump'", "only in the last hop")
+
+        # "none" is the one jump specification a password target accepts
+        direct = SshTarget("hpc"; user="admin", password="x", proxy_jump="none")
+        @test direct.proxy_jump == "none"
         jumped = SshTarget("hpc"; auth=:key, proxy_jump="admin@gw.example.org:2222")
         @test jumped.proxy_jump == "admin@gw.example.org:2222"
         @test refused_with(() -> SshTarget("hpc"; auth=:key, proxy_jump="-oProxyCommand=x"))
@@ -527,6 +574,17 @@ end
                                                                   Any[unknown_auth])))
             @test err isa ArgumentError
             @test occursin("'auth'", sprint(showerror, err))
+
+            # The optional string keys are type-checked by name
+            for key in ("user", "identity_file", "proxy_jump")
+                typed = Dict{String, Any}("host" => "hpc", "auth" => "key", key => 22)
+                err = captured_error(() -> parse_config(Dict{String,
+                                                             Any}("targets" =>
+                                                                      Any[typed])))
+                @test err isa ArgumentError
+                @test occursin("'[[targets]] #1.$(key)' must be of type AbstractString",
+                               sprint(showerror, err))
+            end
         end
 
         # The emulator key is gone: Konsole is the only emulator
@@ -764,6 +822,39 @@ end
                    "-o", "PubkeyAuthentication=no",
                    "-o", "PreferredAuthentications=keyboard-interactive,password",
                    "-o", "NumberOfPasswordPrompts=1", "admin@hpc"]
+
+            # "none" overrides ProxyJump and ProxyCommand of ~/.ssh/config; -J none would
+            # override only the former
+            direct = SshTarget("hpc"; user="admin", password="x", proxy_jump="none")
+            @test ssh_arguments(direct, globals) ==
+                  ["ssh", "-o", "StrictHostKeyChecking=accept-new",
+                   "-o", "ConnectTimeout=10", "-o", "LogLevel=ERROR",
+                   "-o", "PubkeyAuthentication=no",
+                   "-o", "PreferredAuthentications=keyboard-interactive,password",
+                   "-o", "NumberOfPasswordPrompts=1", "-o", "ProxyCommand=none",
+                   "admin@hpc"]
+            direct_key = SshTarget("hpc"; auth=:key, proxy_jump="none")
+            @test ssh_arguments(direct_key, globals)[(end - 2):end] ==
+                  ["-o", "ProxyCommand=none", "hpc"]
+            @test !("-J" in ssh_arguments(direct_key, globals))
+
+            # A key path full of shell syntax reaches ssh as one argument, unexpanded
+            hostile = write_identity_file(joinpath(dir, "id `touch pwned` 'q\" ;&|*"))
+            hostile_target = SshTarget("hpc"; auth=:key, identity_file=hostile)
+            mktempdir() do stub_dir
+                write_executable(joinpath(stub_dir, "ssh"),
+                                 "#!/bin/sh\nprintf '%s\\n' \"\$@\"\n")
+                wrapper = write_executable(joinpath(stub_dir, "hostile.sh"),
+                                           generate_target_wrapper_script(hostile_target,
+                                                                          globals))
+                delivered = withenv("PATH" => stub_dir * ":" * ENV["PATH"]) do
+                    return read(Cmd(`$(wrapper)`; dir=stub_dir), String)
+                end
+                @test delivered ==
+                      join(ssh_arguments(hostile_target, globals)[2:end], "\n") * "\n"
+                @test hostile in split(delivered, "\n")
+                @test !ispath(joinpath(stub_dir, "pwned"))
+            end
 
             # A key wrapper runs ssh directly, without sshpass or a password descriptor
             key_script = generate_target_wrapper_script(key_target, strict_globals)
