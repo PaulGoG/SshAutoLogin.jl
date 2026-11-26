@@ -1,8 +1,8 @@
 const TOP_LEVEL_KEYS = ("globals", "terminal", "targets")
 const GLOBALS_KEYS = ("connect_timeout", "strict_host_key_checking", "log_level")
 const TERMINAL_KEYS = ("mode", "hold", "launch_settle_timeout")
-const TARGET_KEYS = ("host", "port", "user", "password", "title",
-                     "strict_host_key_checking")
+const TARGET_KEYS = ("host", "port", "user", "auth", "password", "identity_file",
+                     "proxy_jump", "title", "strict_host_key_checking")
 
 """
     reject_unknown_keys(table::AbstractDict, allowed, context::AbstractString)
@@ -46,6 +46,17 @@ function required_value(table::AbstractDict, key::AbstractString, ::Type{T},
     if !haskey(table, key)
         throw(ArgumentError("Configuration table $(context) is missing the mandatory key '$(key)'."))
     end
+    return typed_value(table, key, T, nothing, context)
+end
+
+"""
+    optional_value(table::AbstractDict, key::AbstractString, ::Type{T}, context) where {T}
+
+Return `table[key]` checked to be a `T`, or `nothing` when the key is absent.
+"""
+function optional_value(table::AbstractDict, key::AbstractString, ::Type{T},
+                        context::AbstractString) where {T}
+    haskey(table, key) || return nothing
     return typed_value(table, key, T, nothing, context)
 end
 
@@ -97,15 +108,18 @@ function parse_config(dict::AbstractDict)::SessionConfig
             throw(ArgumentError("$(context) is not a table."))
         end
         reject_unknown_keys(entry, TARGET_KEYS, context)
-        targets[index] = SshTarget(required_value(entry, "host", AbstractString, context),
-                                   required_value(entry, "port", Integer, context),
-                                   required_value(entry, "user", AbstractString, context),
-                                   required_value(entry, "password", AbstractString,
-                                                  context),
-                                   typed_value(entry, "title", AbstractString, "", context),
-                                   typed_value(entry, "strict_host_key_checking",
-                                               Union{Nothing, AbstractString}, nothing,
-                                               context))
+        host = required_value(entry, "host", AbstractString, context)
+        port = optional_value(entry, "port", Integer, context)
+        user = optional_value(entry, "user", AbstractString, context)
+        auth = typed_value(entry, "auth", AbstractString, "password", context)
+        password = optional_value(entry, "password", AbstractString, context)
+        identity_file = optional_value(entry, "identity_file", AbstractString, context)
+        proxy_jump = optional_value(entry, "proxy_jump", AbstractString, context)
+        title = typed_value(entry, "title", AbstractString, "", context)
+        policy = typed_value(entry, "strict_host_key_checking",
+                             Union{Nothing, AbstractString}, nothing, context)
+        targets[index] = SshTarget(host; port, user, auth, password, identity_file,
+                                   proxy_jump, title, strict_host_key_checking=policy)
     end
 
     return SessionConfig(globals, terminal, targets)

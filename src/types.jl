@@ -1,45 +1,106 @@
 """
+    default_title(host::AbstractString, port::Union{Nothing, Integer},
+                  user::Union{Nothing, AbstractString})::String
+
+Title of a target without an explicit one: `[user@]host[:port]`, each optional part
+present when set.
+"""
+function default_title(host::AbstractString, port::Union{Nothing, Integer},
+                       user::Union{Nothing, AbstractString})::String
+    return (user === nothing ? "" : user * "@") * host *
+           (port === nothing ? "" : ":$(port)")
+end
+
+"""
     SshTarget
 
 One remote SSH endpoint.
 
 # Fields
-- `host::String`: host name, IPv4 address, or IPv6 literal.
-- `port::Int`: SSH daemon port in `1:65535`.
-- `user::String`: account name on the remote host.
-- `password::String`: authentication password; never rendered by `show`.
-- `title::String`: terminal tab or window title; defaults to `user@host:port`.
+- `host::String`: host name, ssh_config `Host` alias, IPv4 address, or IPv6 literal.
+- `port::Union{Nothing, Int}`: SSH daemon port in `1:65535`, or `nothing` to leave it to
+  ~/.ssh/config or the `ssh` default.
+- `user::Union{Nothing, String}`: account name on the remote host, or `nothing` to leave
+  it to ~/.ssh/config or the local account name.
+- `auth::Symbol`: `:password` (the password is supplied through `sshpass`) or `:key`
+  (no secret is supplied; `ssh` authenticates with an agent, an identity file, a
+  certificate, or an existing master connection, as ~/.ssh/config provides).
+- `password::Union{Nothing, String}`: authentication password, set for `:password` only;
+  never rendered by `show`.
+- `identity_file::Union{Nothing, String}`: absolute path of a private key, `~` expanded,
+  for `:key` only; offered alone (`-i <path> -o IdentitiesOnly=yes`).
+- `proxy_jump::Union{Nothing, String}`: `ssh -J` jump-host specification, for `:key`
+  only.
+- `title::String`: terminal tab or window title; defaults to `[user@]host[:port]`.
 - `strict_host_key_checking::Union{Nothing, String}`: per-target host-key policy
   override, or `nothing` to inherit the global policy.
 
-# Example
+# Constructors
+    SshTarget(host; port=nothing, user=nothing, auth=:password, password=nothing,
+              identity_file=nothing, proxy_jump=nothing, title="",
+              strict_host_key_checking=nothing)
+    SshTarget(host, port, user, password, title="", strict_host_key_checking=nothing)
+
+The positional form builds a password target. Both validate through
+[`validate_target_fields`](@ref) and throw `ArgumentError` on invalid fields.
+
+# Examples
 ```julia
 target = SshTarget("node01.cluster.local", 22, "scientist", "secret", "Node 01")
+cluster = SshTarget("hpc"; auth=:key)
 ```
 """
 struct SshTarget
     host::String
-    port::Int
-    user::String
-    password::String
+    port::Union{Nothing, Int}
+    user::Union{Nothing, String}
+    auth::Symbol
+    password::Union{Nothing, String}
+    identity_file::Union{Nothing, String}
+    proxy_jump::Union{Nothing, String}
     title::String
     strict_host_key_checking::Union{Nothing, String}
 
-    function SshTarget(host::AbstractString, port::Integer, user::AbstractString,
-                       password::AbstractString, title::AbstractString="",
+    function SshTarget(host::AbstractString; port::Union{Nothing, Integer}=nothing,
+                       user::Union{Nothing, AbstractString}=nothing,
+                       auth::Union{Symbol, AbstractString}=:password,
+                       password::Union{Nothing, AbstractString}=nothing,
+                       identity_file::Union{Nothing, AbstractString}=nothing,
+                       proxy_jump::Union{Nothing, AbstractString}=nothing,
+                       title::AbstractString="",
                        strict_host_key_checking::Union{Nothing, AbstractString}=nothing)
-        validate_target_fields(host, port, user, password, title, strict_host_key_checking)
-        resolved_title = isempty(title) ? "$(user)@$(host):$(port)" : String(title)
-        policy = strict_host_key_checking === nothing ? nothing :
-                 String(strict_host_key_checking)
-        return new(String(host), Int(port), String(user), String(password), resolved_title,
-                   policy)
+        method = Symbol(auth)
+        key_path = identity_file === nothing ? nothing : expanduser(identity_file)
+        validate_target_fields(host, port, user, method, password, key_path, proxy_jump,
+                               title, strict_host_key_checking)
+        resolved_title = isempty(title) ? default_title(host, port, user) : String(title)
+        return new(String(host), port === nothing ? nothing : Int(port),
+                   user === nothing ? nothing : String(user), method,
+                   password === nothing ? nothing : String(password),
+                   key_path === nothing ? nothing : String(key_path),
+                   proxy_jump === nothing ? nothing : String(proxy_jump), resolved_title,
+                   strict_host_key_checking === nothing ? nothing :
+                   String(strict_host_key_checking))
     end
 end
 
+function SshTarget(host::AbstractString, port::Integer, user::AbstractString,
+                   password::AbstractString, title::AbstractString="",
+                   strict_host_key_checking::Union{Nothing, AbstractString}=nothing)
+    return SshTarget(host; port, user, auth=:password, password, title,
+                     strict_host_key_checking)
+end
+
 function Base.show(io::IO, target::SshTarget)
-    print(io, "SshTarget(", repr(target.title), ", ", target.user, "@", target.host, ":",
-          target.port, ", password = <redacted>")
+    print(io, "SshTarget(", repr(target.title), ", ",
+          default_title(target.host, target.port, target.user), ", auth = ", target.auth)
+    target.auth == :password && print(io, ", password = <redacted>")
+    if target.identity_file !== nothing
+        print(io, ", identity_file = ", repr(target.identity_file))
+    end
+    if target.proxy_jump !== nothing
+        print(io, ", proxy_jump = ", repr(target.proxy_jump))
+    end
     if target.strict_host_key_checking !== nothing
         print(io, ", strict_host_key_checking = ", repr(target.strict_host_key_checking))
     end

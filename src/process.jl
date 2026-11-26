@@ -1,8 +1,8 @@
 """
     MissingBinaryError
 
-Thrown when a required executable (`bash`, `ssh`, `sshpass`, or `konsole`)
-is not found in `PATH`.
+Thrown when a required executable (`bash`, `ssh`, `konsole`, and `sshpass` when a
+password target is present) is not found in `PATH`.
 """
 struct MissingBinaryError <: Exception
     binaries::Vector{String}
@@ -15,13 +15,16 @@ function Base.showerror(io::IO, err::MissingBinaryError)
 end
 
 """
-    check_prerequisites()
+    check_prerequisites(targets::AbstractVector{SshTarget})
 
 Throw [`MissingBinaryError`](@ref) unless `bash` (the wrapper scripts are Bash), `ssh`,
-`sshpass`, and `konsole` are all found in `PATH`.
+and `konsole` are all found in `PATH`, together with `sshpass` when any of `targets`
+uses `auth = :password`.
 """
-function check_prerequisites()
-    required = ["bash", "ssh", "sshpass", KONSOLE]
+function check_prerequisites(targets::AbstractVector{SshTarget})
+    required = ["bash", "ssh"]
+    any(t -> t.auth == :password, targets) && push!(required, "sshpass")
+    push!(required, KONSOLE)
     missing_binaries = filter(name -> Sys.which(name) === nothing, required)
     isempty(missing_binaries) || throw(MissingBinaryError(missing_binaries))
     return nothing
@@ -92,20 +95,40 @@ end
 """
     ssh_arguments(target::SshTarget, globals::GlobalConfig)::Vector{String}
 
-Return the `ssh` argument vector for `target`, including the resolved host-key policy,
-the connection timeout, the log level, and a single password prompt. Public-key
-authentication is disabled and the preferred methods are pinned to keyboard-interactive
-and password, so that an agent holding many keys cannot exhaust the server's
-authentication attempts and an encrypted key cannot trigger a passphrase prompt that
-`sshpass` does not answer.
+Return the `ssh` argument vector for `target`: the port when set, the resolved host-key
+policy, the connection timeout, the log level, the options of the authentication mode,
+and the destination `[user@]host`. Unset port and user are left to ~/.ssh/config.
+
+For `auth = :password`, public-key authentication is disabled, the preferred methods are
+pinned to keyboard-interactive and password, and a single password prompt is allowed, so
+that an agent holding many keys cannot exhaust the server's authentication attempts and
+an encrypted key cannot trigger a passphrase prompt that `sshpass` does not answer.
+
+For `auth = :key`, no method is pinned: `ssh` proceeds as ~/.ssh/config directs, and any
+prompt (key passphrase, second factor) is answered in the tab. A set `identity_file` is
+passed as `-i <path> -o IdentitiesOnly=yes`, a set `proxy_jump` as `-J <spec>`.
 """
 function ssh_arguments(target::SshTarget, globals::GlobalConfig)::Vector{String}
     policy = resolve_host_key_policy(target, globals)
-    return String["ssh", "-p", string(target.port), "-o", "StrictHostKeyChecking=$(policy)",
-                  "-o", "ConnectTimeout=$(globals.connect_timeout)", "-o",
-                  "LogLevel=$(globals.log_level)", "-o", "PubkeyAuthentication=no", "-o",
-                  "PreferredAuthentications=keyboard-interactive,password", "-o",
-                  "NumberOfPasswordPrompts=1", "$(target.user)@$(target.host)"]
+    arguments = String["ssh"]
+    target.port === nothing || append!(arguments, ("-p", string(target.port)))
+    append!(arguments,
+            ("-o", "StrictHostKeyChecking=$(policy)", "-o",
+             "ConnectTimeout=$(globals.connect_timeout)", "-o",
+             "LogLevel=$(globals.log_level)"))
+    if target.auth == :password
+        append!(arguments,
+                ("-o", "PubkeyAuthentication=no", "-o",
+                 "PreferredAuthentications=keyboard-interactive,password", "-o",
+                 "NumberOfPasswordPrompts=1"))
+    else
+        if target.identity_file !== nothing
+            append!(arguments, ("-i", target.identity_file, "-o", "IdentitiesOnly=yes"))
+        end
+        target.proxy_jump === nothing || append!(arguments, ("-J", target.proxy_jump))
+    end
+    push!(arguments, target_label(target.host, target.user))
+    return arguments
 end
 
 """
@@ -114,16 +137,35 @@ end
 
 Return the text of the Bash wrapper that opens the SSH session for `target`.
 
-The script unlinks itself as its first action, exposes the password to `sshpass` through
-file descriptor 3 (a pipe fed by a process substitution, so the secret appears in no
-environment or argument vector), and replaces itself with `sshpass -d 3 ssh ...`. With
-`hold = true` the script instead waits for the session to end, prints its exit status,
-and waits for Enter before the tab closes. Every interpolated value is quoted with
-`Base.shell_escape_posixly`.
+The script unlinks itself as its first action. For `auth = :password` it exposes the
+password to `sshpass` through file descriptor 3 (a pipe fed by a process substitution,
+so the secret appears in no environment or argument vector) and replaces itself with
+`sshpass -d 3 ssh ...`. For `auth = :key` it holds no secret and replaces itself with
+`ssh ...`. With `hold = true` the script instead waits for the session to end, prints
+its exit status, and waits for Enter before the tab closes. Every interpolated value is
+quoted with `Base.shell_escape_posixly`.
 """
 function generate_target_wrapper_script(target::SshTarget, globals::GlobalConfig;
                                         hold::Bool=false)::String
-    quoted_password = Base.shell_escape_posixly(target.password)
+    if target.auth == :key
+        key_command = Base.shell_escape_posixly(ssh_arguments(target, globals)...)
+        key_header = """
+                     #!/usr/bin/env bash
+                     # Generated by SshAutoLogin.jl; removed from the file system on first execution.
+                     rm -f -- "\$0"
+                     """
+        if hold
+            return key_header * """
+                                $(key_command)
+                                status=\$?
+                                printf '\\nSSH session ended with exit status %d. Press Enter to close this tab.\\n' "\$status"
+                                read -r _
+                                """
+        end
+        return key_header * "exec $(key_command)\n"
+    end
+    # A password target always holds a password; the constructor refuses one without.
+    quoted_password = Base.shell_escape_posixly(target.password::String)
     session_command = Base.shell_escape_posixly("sshpass", "-d", "3",
                                                 ssh_arguments(target, globals)...)
     header = """
@@ -291,7 +333,7 @@ while an emulator is still running, the directory is kept, with a warning, and a
 launch purges it.
 """
 function launch_sessions(config::SessionConfig)::Vector{Base.Process}
-    check_prerequisites()
+    check_prerequisites(config.targets)
     base = runtime_directory()
     purge_stale_launches!(base, config.terminal.launch_settle_timeout)
     directory = mktempdir(base; prefix=LAUNCH_PREFIX, cleanup=false)

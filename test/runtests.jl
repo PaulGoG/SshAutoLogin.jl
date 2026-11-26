@@ -9,7 +9,8 @@ using SshAutoLogin
 using SshAutoLogin: is_valid_host, command_string, runtime_directory, purge_stale_launches!,
                     generate_target_wrapper_script, generate_tabs_file_content,
                     build_tabs_launch_command, build_single_window_command,
-                    emulator_commands
+                    emulator_commands, is_valid_proxy_jump, ssh_arguments,
+                    check_prerequisites
 using Aqua
 using ExplicitImports
 
@@ -78,6 +79,25 @@ function captured_error(f)
         return err
     end
     return nothing
+end
+
+"""
+    refused_with(f, fragments...)
+
+`true` when `f()` throws an `ArgumentError` whose message contains every fragment.
+"""
+function refused_with(f, fragments::AbstractString...)
+    err = captured_error(f)
+    err isa ArgumentError || return false
+    message = sprint(showerror, err)
+    return all(fragment -> occursin(fragment, message), fragments)
+end
+
+# Regular file with owner-only permissions, standing in for a private key.
+function write_identity_file(path::AbstractString; mode=0o600)
+    write(path, "stub key material\n")
+    chmod(path, mode)
+    return path
 end
 
 const DRIVER = joinpath(dirname(@__DIR__), "scripts", "run.jl")
@@ -167,10 +187,12 @@ end
 
     @testset "Field validation" begin
         for host in ("node01.cluster.local", "192.168.1.10", "localhost", "a-b.c.", "::1",
-                     "2001:db8::1", "::ffff:192.0.2.1")
+                     "2001:db8::1", "::ffff:192.0.2.1", "my_cluster",
+                     "hpc_login.example.org")
             @test is_valid_host(host)
         end
         for host in ("", "host name", "bad_host!", "-leading.dash", "a..b", ":", "::",
+                     "-oProxyCommand=x",
                      "a"^254, "host;rm -rf /", "[2001:db8::1]", "[::1", "::1]",
                      "node01\n", "::1\n")
             @test !is_valid_host(host)
@@ -207,6 +229,98 @@ end
         @test t.strict_host_key_checking == "yes"
         @test SshTarget("10.0.0.1", 2222, "root", "toor").title == "root@10.0.0.1:2222"
         @test SshTarget("2001:db8::1", 22, "root", "toor").host == "2001:db8::1"
+        @test SshTarget("10.0.0.1", 2222, "root", "toor").auth == :password
+
+        # Key targets and ssh_config aliases: host only is a complete target
+        alias = SshTarget("hpc"; auth=:key)
+        @test alias.host == "hpc"
+        @test alias.port === nothing
+        @test alias.user === nothing
+        @test alias.password === nothing
+        @test alias.identity_file === nothing
+        @test alias.proxy_jump === nothing
+        @test alias.title == "hpc"
+        @test alias.auth == :key
+        @test SshTarget("hpc"; auth="key").auth == :key
+        @test SshTarget("my_cluster"; auth=:key).host == "my_cluster"
+        @test SshTarget("hpc"; user="researcher", auth=:key).title == "researcher@hpc"
+        @test SshTarget("hpc"; port=2222, auth=:key).title == "hpc:2222"
+        @test SshTarget("hpc"; user="researcher", port=2222, auth=:key).title ==
+              "researcher@hpc:2222"
+        @test SshTarget("hpc"; user="admin", password="x").auth == :password
+        @test SshTarget("hpc"; user="admin", password="x").port === nothing
+
+        @test refused_with(() -> SshTarget("-oProxyCommand=x"; auth=:key))
+        @test refused_with(() -> SshTarget("hpc;ls"; auth=:key))
+        @test refused_with(() -> SshTarget("hpc"; port=0, auth=:key))
+        @test refused_with(() -> SshTarget("hpc"; port=65536, auth=:key))
+        @test refused_with(() -> SshTarget("hpc"; user="", auth=:key))
+        @test refused_with(() -> SshTarget("hpc"; user="a b", auth=:key))
+        @test refused_with(() -> SshTarget("hpc"; auth=:pubkey), "'auth'")
+        @test refused_with(() -> SshTarget("hpc"; auth="agent"), "'auth'")
+
+        # Password targets: the password is mandatory, key-only options are refused
+        @test refused_with(() -> SshTarget("hpc"; user="admin"), "auth = \"password\"",
+                           "'password'")
+        @test refused_with(() -> SshTarget("hpc"; user="admin", password=""))
+        @test refused_with(() -> SshTarget("hpc"; user="admin", password="a\nb"))
+        @test refused_with(() -> SshTarget("hpc"; password="x",
+                                           identity_file="/home/researcher/.ssh/id"),
+                           "'identity_file'", "auth = \"key\" only")
+        @test refused_with(() -> SshTarget("hpc"; password="x",
+                                           proxy_jump="gw.example.org"), "'proxy_jump'",
+                           "sshpass")
+        err = captured_error(() -> SshTarget("hpc"; auth=:key,
+                                             password="never-shown-secret"))
+        @test err isa ArgumentError
+        @test occursin("must not be set with auth = \"key\"", sprint(showerror, err))
+        @test !occursin("never-shown-secret", sprint(showerror, err))
+
+        # Identity files
+        mktempdir() do dir
+            identity = write_identity_file(joinpath(dir, "id_test"))
+            key = SshTarget("hpc"; auth=:key, identity_file=identity)
+            @test key.identity_file == identity
+
+            home_target = withenv("HOME" => dir) do
+                return SshTarget("hpc"; auth=:key, identity_file="~/id_test")
+            end
+            @test home_target.identity_file == joinpath(dir, "id_test")
+
+            @test refused_with(() -> SshTarget("hpc"; auth=:key, identity_file="id_test"),
+                               "absolute path or start with '~'")
+            @test refused_with(() -> SshTarget("hpc"; auth=:key,
+                                               identity_file="id_ed25519"),
+                               "absolute path or start with '~'")
+            @test refused_with(() -> SshTarget("hpc"; auth=:key,
+                                               identity_file=identity * "\n"))
+            @test refused_with(() -> SshTarget("hpc"; auth=:key,
+                                               identity_file=joinpath(dir, "absent")))
+            @test refused_with(() -> SshTarget("hpc"; auth=:key, identity_file=dir),
+                               "not a regular file")
+            open_key = write_identity_file(joinpath(dir, "id_open"); mode=0o644)
+            @test refused_with(() -> SshTarget("hpc"; auth=:key, identity_file=open_key),
+                               "chmod 600")
+            group_key = write_identity_file(joinpath(dir, "id_group"); mode=0o640)
+            @test refused_with(() -> SshTarget("hpc"; auth=:key, identity_file=group_key),
+                               "chmod 600")
+        end
+
+        # ProxyJump specifications
+        for spec in ("none", "gateway.example.org", "admin@gateway.example.org",
+                     "admin@gateway.example.org:2222",
+                     "gw1.example.org,admin@gw2.example.org:2200", "[2001:db8::1]",
+                     "admin@[2001:db8::1]:22", "gw_alias")
+            @test is_valid_proxy_jump(spec)
+        end
+        for spec in ("", "gw1,,gw2", "gw1,", "-oProxyCommand=x", "admin@", "@gw", "gw:0",
+                     "gw:65536", "gw:22x", "ssh://gw.example.org", "2001:db8::1",
+                     "bad user@gw", "gw\n", "[not-ipv6]", "a@b@c")
+            @test !is_valid_proxy_jump(spec)
+        end
+        jumped = SshTarget("hpc"; auth=:key, proxy_jump="admin@gw.example.org:2222")
+        @test jumped.proxy_jump == "admin@gw.example.org:2222"
+        @test refused_with(() -> SshTarget("hpc"; auth=:key, proxy_jump="-oProxyCommand=x"))
 
         @test_throws ArgumentError GlobalConfig(0, "accept-new", "ERROR")
         @test_throws ArgumentError GlobalConfig(10, "invalid_policy", "ERROR")
@@ -235,6 +349,26 @@ end
         config = SessionConfig(GlobalConfig(), TerminalOptions(), [t])
         @test !occursin(AWKWARD_PASSWORD, sprint(show, config))
         @test !occursin(AWKWARD_PASSWORD, sprint(show, MIME("text/plain"), [t]))
+        @test occursin("auth = password", shown)
+
+        mktempdir() do dir
+            identity = write_identity_file(joinpath(dir, "id_test"))
+            key = SshTarget("hpc"; port=2222, user="researcher", auth=:key,
+                            identity_file=identity, proxy_jump="admin@gw.example.org")
+            shown_key = sprint(show, key)
+            @test occursin("auth = key", shown_key)
+            @test occursin("researcher@hpc:2222", shown_key)
+            @test occursin("identity_file = \"$(identity)\"", shown_key)
+            @test occursin("proxy_jump = \"admin@gw.example.org\"", shown_key)
+            @test !occursin("password", shown_key)
+            @test !occursin("<redacted>", shown_key)
+
+            bare = sprint(show, SshTarget("hpc"; auth=:key))
+            @test occursin("auth = key", bare)
+            @test !occursin("identity_file", bare)
+            @test !occursin("proxy_jump", bare)
+            @test !occursin("password", bare)
+        end
     end
 
     @testset "Configuration parsing" begin
@@ -307,6 +441,93 @@ end
         err = captured_error(() -> parse_config(Dict{String, Any}("targets" => Any[typo])))
         @test err isa ArgumentError
         @test occursin("pasword", sprint(showerror, err))
+
+        # Port and user are optional, and a password target may omit both
+        no_port = delete!(copy(base_target), "port")
+        no_user = delete!(copy(base_target), "user")
+        for target in (no_port, no_user)
+            parsed = parse_config(Dict{String, Any}("targets" => Any[target]))
+            @test parsed isa SessionConfig
+        end
+        @test only(parse_config(Dict{String, Any}("targets" => Any[no_port])).targets).port ===
+              nothing
+        @test only(parse_config(Dict{String, Any}("targets" => Any[no_user])).targets).user ===
+              nothing
+        @test only(parse_config(Dict{String, Any}("targets" => Any[base_target])).targets).auth ==
+              :password
+
+        # Key targets
+        mktempdir() do dir
+            identity = write_identity_file(joinpath(dir, "id_test"))
+            alias_target = Dict{String, Any}("host" => "hpc", "auth" => "key")
+            full_key = Dict{String, Any}("host" => "hpc", "auth" => "key",
+                                         "user" => "researcher", "port" => 2222,
+                                         "proxy_jump" => "admin@gw.example.org",
+                                         "identity_file" => identity)
+            config = parse_config(Dict{String, Any}("targets" =>
+                                                        Any[alias_target, full_key]))
+            k1, k2 = config.targets
+            @test k1.auth == :key
+            @test k1.host == "hpc"
+            @test k1.port === nothing
+            @test k1.user === nothing
+            @test k1.password === nothing
+            @test k1.identity_file === nothing
+            @test k1.proxy_jump === nothing
+            @test k1.title == "hpc"
+            @test k2.auth == :key
+            @test k2.port == 2222
+            @test k2.user == "researcher"
+            @test k2.identity_file == identity
+            @test k2.proxy_jump == "admin@gw.example.org"
+            @test k2.title == "researcher@hpc:2222"
+
+            # The same targets through the TOML loader
+            path = joinpath(dir, "config.toml")
+            write(path,
+                  """
+                  [[targets]]
+                  host = "hpc"
+                  auth = "key"
+
+                  [[targets]]
+                  host = "hpc"
+                  user = "researcher"
+                  port = 2222
+                  auth = "key"
+                  identity_file = "$(identity)"
+                  proxy_jump = "none"
+                  """)
+            chmod(path, 0o600)
+            loaded = load_config(path)
+            @test length(loaded.targets) == 2
+            @test loaded.targets[1].auth == :key
+            @test loaded.targets[2].identity_file == identity
+            @test loaded.targets[2].proxy_jump == "none"
+
+            wrong_auth_type = Dict{String, Any}("host" => "hpc", "auth" => 1)
+            err = captured_error(() -> parse_config(Dict{String,
+                                                         Any}("targets" =>
+                                                                  Any[wrong_auth_type])))
+            @test err isa ArgumentError
+            @test occursin("'[[targets]] #1.auth' must be of type AbstractString",
+                           sprint(showerror, err))
+
+            key_with_password = Dict{String, Any}("host" => "hpc", "auth" => "key",
+                                                  "password" => "never-shown-secret")
+            err = captured_error(() -> parse_config(Dict{String,
+                                                         Any}("targets" =>
+                                                                  Any[key_with_password])))
+            @test err isa ArgumentError
+            @test !occursin("never-shown-secret", sprint(showerror, err))
+
+            unknown_auth = Dict{String, Any}("host" => "hpc", "auth" => "pubkey")
+            err = captured_error(() -> parse_config(Dict{String,
+                                                         Any}("targets" =>
+                                                                  Any[unknown_auth])))
+            @test err isa ArgumentError
+            @test occursin("'auth'", sprint(showerror, err))
+        end
 
         # The emulator key is gone: Konsole is the only emulator
         legacy_terminal = Dict{String, Any}("emulator" => "konsole")
@@ -518,6 +739,68 @@ end
             @test !isfile(wrapper)
         end
 
+        # ssh argument vectors of key targets, ssh_config aliases, and port-less targets
+        alias_target = SshTarget("hpc"; auth=:key)
+        @test ssh_arguments(alias_target, globals) ==
+              ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10",
+               "-o", "LogLevel=ERROR", "hpc"]
+
+        mktempdir() do dir
+            identity = write_identity_file(joinpath(dir, "id_test"))
+            strict_globals = GlobalConfig(10, "yes", "ERROR")
+            key_target = SshTarget("hpc"; port=2222, user="researcher", auth=:key,
+                                   identity_file=identity,
+                                   proxy_jump="admin@gw.example.org")
+            @test ssh_arguments(key_target, strict_globals) ==
+                  ["ssh", "-p", "2222", "-o", "StrictHostKeyChecking=yes",
+                   "-o", "ConnectTimeout=10", "-o", "LogLevel=ERROR",
+                   "-i", identity, "-o", "IdentitiesOnly=yes",
+                   "-J", "admin@gw.example.org", "researcher@hpc"]
+
+            portless = SshTarget("hpc"; user="admin", password="x")
+            @test ssh_arguments(portless, globals) ==
+                  ["ssh", "-o", "StrictHostKeyChecking=accept-new",
+                   "-o", "ConnectTimeout=10", "-o", "LogLevel=ERROR",
+                   "-o", "PubkeyAuthentication=no",
+                   "-o", "PreferredAuthentications=keyboard-interactive,password",
+                   "-o", "NumberOfPasswordPrompts=1", "admin@hpc"]
+
+            # A key wrapper runs ssh directly, without sshpass or a password descriptor
+            key_script = generate_target_wrapper_script(key_target, strict_globals)
+            @test startswith(key_script, "#!/usr/bin/env bash\n")
+            @test occursin("rm -f -- \"\$0\"", key_script)
+            @test occursin("exec ssh", key_script)
+            @test !occursin("sshpass", key_script)
+            @test !occursin("exec 3", key_script)
+
+            mktempdir() do stub_dir
+                write_executable(joinpath(stub_dir, "ssh"),
+                                 "#!/bin/sh\nprintf '%s\\n' \"\$@\"\n")
+                wrapper = write_executable(joinpath(stub_dir, "key.sh"), key_script)
+                delivered = withenv("PATH" => stub_dir * ":" * ENV["PATH"]) do
+                    return read(`$(wrapper)`, String)
+                end
+                @test delivered ==
+                      join(ssh_arguments(key_target, strict_globals)[2:end], "\n") * "\n"
+                @test !isfile(wrapper)
+            end
+
+            hold_key_script = generate_target_wrapper_script(key_target, strict_globals;
+                                                             hold=true)
+            @test !occursin("sshpass", hold_key_script)
+            @test !occursin("exec 3<&-", hold_key_script)
+            mktempdir() do stub_dir
+                write_executable(joinpath(stub_dir, "ssh"), "#!/bin/sh\nexit 7\n")
+                wrapper = write_executable(joinpath(stub_dir, "hold_key.sh"),
+                                           hold_key_script)
+                output = withenv("PATH" => stub_dir * ":" * ENV["PATH"]) do
+                    return read(pipeline(`$(wrapper)`; stdin=IOBuffer("\n")), String)
+                end
+                @test occursin("exit status 7", output)
+                @test !isfile(wrapper)
+            end
+        end
+
         tabs = generate_tabs_file_content([target1, target2], ["/run/t1.sh", "/run/t2.sh"])
         @test tabs ==
               "title: Primary Node ;; command: /run/t1.sh\ntitle: Secondary Node ;; command: /run/t2.sh\n"
@@ -547,6 +830,25 @@ end
         # Even a command that carries a secret in its environment is rendered safely.
         leaky = setenv(`echo x`, "SSHPASS" => AWKWARD_PASSWORD)
         @test command_string(leaky) == "echo x"
+    end
+
+    @testset "Prerequisites by authentication method" begin
+        bash = Sys.which("bash")
+        @test bash !== nothing
+        mktempdir() do bin
+            symlink(bash, joinpath(bin, "bash"))
+            write_executable(joinpath(bin, "ssh"), "#!/bin/sh\nexit 0\n")
+            write_executable(joinpath(bin, "konsole"), "#!/bin/sh\nexit 0\n")
+            withenv("PATH" => bin) do
+                @test check_prerequisites([SshTarget("hpc"; auth=:key)]) === nothing
+                err = captured_error(() -> check_prerequisites([SshTarget("hpc";
+                                                                          auth=:key),
+                                                                SshTarget("10.0.0.1", 22,
+                                                                          "root", "toor")]))
+                @test err isa MissingBinaryError
+                @test err.binaries == ["sshpass"]
+            end
+        end
     end
 
     @testset "Runtime directory" begin
@@ -645,6 +947,20 @@ end
             end
             foreach(wait, processes)
             @test !any(log -> log.level == Base.CoreLogging.Warn, logs)
+            @test isempty(readdir(joinpath(runtime_dir, "ssh-autologin")))
+        end
+
+        # A key target needs no sshpass: the launch proceeds without it, silently.
+        key_config = SessionConfig(globals, TerminalOptions(:tabs, false, 5),
+                                   [SshTarget("hpc"; auth=:key)])
+        with_stub_environment(CONSUMING_KONSOLE) do stub_dir, runtime_dir
+            rm(joinpath(stub_dir, "sshpass"))
+            logs, processes = Test.collect_test_logs() do
+                return launch_sessions(key_config)
+            end
+            foreach(wait, processes)
+            @test !any(log -> log.level >= Base.CoreLogging.Warn, logs)
+            @test all(p -> p.exitcode == 0, processes)
             @test isempty(readdir(joinpath(runtime_dir, "ssh-autologin")))
         end
 

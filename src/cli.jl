@@ -124,7 +124,7 @@ function run_driver(args::AbstractVector{<:AbstractString}, io::IO, err::IO)::In
 
     @info "Session configuration loaded" path=options.config_path targets=length(config.targets) mode=config.terminal.mode dry_run=options.dry_run
     for (index, target) in enumerate(config.targets)
-        @info "Target" index host=target.host port=target.port user=target.user title=target.title
+        @info "Target" index host=target.host port=target.port user=target.user auth=target.auth title=target.title
     end
 
     if options.dry_run
