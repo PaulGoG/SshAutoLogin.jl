@@ -10,7 +10,7 @@ The password is read from `config.toml` into memory. Each launch creates a direc
 
 ## Known limitations
 
-Any process running under the same account can read the wrapper during the short interval between creation and execution. A wrapper that the emulator has not executed when the settle timeout elapses stays in the launch directory until a later launch purges it or the session ends. The host-key policy `no` disables man-in-the-middle protection; the default `accept-new` trusts a host on first contact. `sshpass` answers the first password prompt it sees: a password target is therefore refused a `proxy_jump`, but a jump host that `~/.ssh/config` sets for it and that asks for a password receives the target's password.
+Any process running under the same account can read the wrapper during the short interval between creation and execution. A wrapper that the emulator has not executed when the settle timeout elapses stays in the launch directory until a later launch purges it or the session ends. The host-key policy `no` disables man-in-the-middle protection; the default `accept-new` trusts a host on first contact. `sshpass` answers the first password prompt it sees: a password target is therefore refused a `proxy_jump` other than `"none"`, but a jump host that `~/.ssh/config` sets for it and that asks for a password receives the target's password. The host-key policy and the other options of the package apply to the target only; jump hosts are verified as their own entries in `~/.ssh/config` say.
 
 ## Reporting a vulnerability
 
