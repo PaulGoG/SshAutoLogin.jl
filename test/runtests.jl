@@ -768,15 +768,18 @@ end
         @test !occursin("SSHPASS", script)
 
         # The wrapper delivers the ssh argument vector and the exact password over file
-        # descriptor 3, then removes itself.
+        # descriptor 3, then removes itself. A session that prefers an askpass program
+        # would otherwise take the prompt away from sshpass.
         mktempdir() do dir
             write_executable(joinpath(dir, "sshpass"),
-                             "#!/bin/sh\nprintf '%s\\n' \"\$@\"\ncat <&3\n")
+                             "#!/bin/sh\nprintf '%s\\n' \"\$SSH_ASKPASS_REQUIRE\" \"\$@\"\ncat <&3\n")
             wrapper = write_executable(joinpath(dir, "target.sh"), script)
-            delivered = withenv("PATH" => dir * ":" * ENV["PATH"]) do
+            delivered = withenv("PATH" => dir * ":" * ENV["PATH"],
+                                "SSH_ASKPASS_REQUIRE" => "prefer") do
                 return read(`$(wrapper)`, String)
             end
-            expected = ["-d", "3", "ssh", "-p", "2222", "-o", "StrictHostKeyChecking=no",
+            expected = ["never",
+                        "-d", "3", "ssh", "-p", "2222", "-o", "StrictHostKeyChecking=no",
                         "-o", "ConnectTimeout=10", "-o", "LogLevel=ERROR",
                         "-o", "PubkeyAuthentication=no",
                         "-o", "PreferredAuthentications=keyboard-interactive,password",
@@ -856,13 +859,15 @@ end
                 @test !ispath(joinpath(stub_dir, "pwned"))
             end
 
-            # A key wrapper runs ssh directly, without sshpass or a password descriptor
+            # A key wrapper runs ssh directly, without sshpass or a password descriptor,
+            # and leaves the askpass preference of the session to the user in the tab
             key_script = generate_target_wrapper_script(key_target, strict_globals)
             @test startswith(key_script, "#!/usr/bin/env bash\n")
             @test occursin("rm -f -- \"\$0\"", key_script)
             @test occursin("exec ssh", key_script)
             @test !occursin("sshpass", key_script)
             @test !occursin("exec 3", key_script)
+            @test !occursin("SSH_ASKPASS", key_script)
 
             mktempdir() do stub_dir
                 write_executable(joinpath(stub_dir, "ssh"),

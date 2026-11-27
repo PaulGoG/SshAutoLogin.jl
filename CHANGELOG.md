@@ -16,6 +16,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 - `sshpass` is required only when the configuration holds a password target.
 - **Breaking** for library use: `SshTarget` has the fields `auth`, `identity_file`, and `proxy_jump`, and `port`, `user`, and `password` may be `nothing`. The keyword constructor `SshTarget(host; ...)` takes every field; the positional constructor still builds a password target.
 
+### Fixed
+
+- With `SSH_ASKPASS_REQUIRE=prefer` or `force` in the desktop session, as set up for a graphical askpass program such as ksshaskpass, ssh asked that program for the password of a password target instead of the terminal that `sshpass` answers, and the login failed or opened a dialog. The wrapper of a password target sets `SSH_ASKPASS_REQUIRE=never`.
+
 ## [0.4.0] - 2026-11-25
 
 ### Fixed
