@@ -4,6 +4,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-27
+
 ### Added
 
 - Key-based targets: `auth = "key"` opens the session with whatever `ssh` authenticates by itself (agent, identity file, certificate, master connection), and a key passphrase or a second factor is answered in the tab. The wrapper of such a target holds no secret and runs `ssh` without `sshpass`. `auth = "password"` is the default and behaves as before.
@@ -97,7 +99,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); ver
 - Command-line entry point `scripts/run.jl` with `--config` and `--dry-run`.
 - Test suite with Aqua, JET, ExplicitImports, and launch tests against a stub emulator; formatting enforced by a dedicated `format/` environment and CI job.
 
-[Unreleased]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/PaulGoG/SshAutoLogin.jl/compare/v0.2.0...v0.2.1
