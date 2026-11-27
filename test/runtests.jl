@@ -362,9 +362,22 @@ end
         @test refused_with(() -> SshTarget("hpc"; auth=:key, proxy_jump="[::1],gw"),
                            "'proxy_jump'", "only in the last hop")
 
-        # "none" is the one jump specification a password target accepts
+        # "none" is the one jump specification a password target accepts. ssh reads it in
+        # any letter case; -J NONE would leave a ProxyCommand of ~/.ssh/config in force
         direct = SshTarget("hpc"; user="admin", password="x", proxy_jump="none")
         @test direct.proxy_jump == "none"
+        for spelling in ("NONE", "None")
+            @test SshTarget("hpc"; user="admin", password="x",
+                            proxy_jump=spelling).proxy_jump == "none"
+            keyed = SshTarget("hpc"; auth=:key, proxy_jump=spelling)
+            @test keyed.proxy_jump == "none"
+            @test ssh_arguments(keyed, GlobalConfig())[(end - 2):end] ==
+                  ["-o", "ProxyCommand=none", "hpc"]
+        end
+        # The host is not validated when auth is refused, so the message quotes it
+        auth_error = captured_error(() -> SshTarget("a\e[2Jb"; auth="x"))
+        @test !occursin('\e', sprint(showerror, auth_error))
+        @test occursin("'auth'", sprint(showerror, auth_error))
         jumped = SshTarget("hpc"; auth=:key, proxy_jump="admin@gw.example.org:2222")
         @test jumped.proxy_jump == "admin@gw.example.org:2222"
         @test refused_with(() -> SshTarget("hpc"; auth=:key, proxy_jump="-oProxyCommand=x"))

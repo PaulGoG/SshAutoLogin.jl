@@ -57,5 +57,5 @@ auth = "key"
 # absolute or starting with '~/'; no '%' or '$'; no group or other permission bits unless it ends in .pub
 # identity_file = "~/.ssh/id_ed25519_hpc"
 
-# Jump hosts passed as ssh -J (optional, key targets only)
+# Jump hosts passed as ssh -J (optional; key targets, or "none" on any target)
 proxy_jump = "admin@gateway.example.org"  # [user@]host[:port] hops separated by ','; IPv6 in brackets in the last hop only; "none" (any target) = direct

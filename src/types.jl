@@ -32,7 +32,8 @@ One remote SSH endpoint.
   `-i <path> -o IdentitiesOnly=yes`, so that no agent key outside the configured identity
   files is offered.
 - `proxy_jump::Union{Nothing, String}`: `ssh -J` jump-host specification, for `:key`
-  only, or `"none"` (any target) to connect directly whatever ~/.ssh/config routes.
+  only, or `"none"` (any target; accepted in any letter case and stored as `"none"`) to
+  connect directly whatever ~/.ssh/config routes.
 - `title::String`: terminal tab or window title; defaults to `[user@]host[:port]`.
 - `strict_host_key_checking::Union{Nothing, String}`: per-target host-key policy
   override, or `nothing` to inherit the global policy.
@@ -72,21 +73,26 @@ struct SshTarget
                        title::AbstractString="",
                        strict_host_key_checking::Union{Nothing, AbstractString}=nothing)
         # A string is compared before Symbol(), which throws on a NUL byte without naming the key
+        # host is not validated yet, hence repr
         if auth isa AbstractString && !(auth in ("password", "key"))
-            throw(ArgumentError("SSH target 'auth' ($(repr(auth))) for $(target_label(host, user)) must be one of \"password\" or \"key\"."))
+            throw(ArgumentError("SSH target 'auth' ($(repr(auth))) of host $(repr(String(host))) must be one of \"password\" or \"key\"."))
         end
         method = Symbol(auth)
         # A password target is refused for having identity_file at all, whatever its form
         key_path = identity_file === nothing || method != :key ? identity_file :
                    expand_identity_file(identity_file)
-        validate_target_fields(host, port, user, method, password, key_path, proxy_jump,
-                               title, strict_host_key_checking)
+        # ssh reads "none" in any letter case as the keyword; "NONE" would otherwise pass as
+        # a hop and reach ssh as -J NONE, which leaves a ProxyCommand of ~/.ssh/config active
+        jump = proxy_jump !== nothing && lowercase(proxy_jump) == "none" ? "none" :
+               proxy_jump
+        validate_target_fields(host, port, user, method, password, key_path, jump, title,
+                               strict_host_key_checking)
         resolved_title = isempty(title) ? default_title(host, port, user) : String(title)
         return new(String(host), port === nothing ? nothing : Int(port),
                    user === nothing ? nothing : String(user), method,
                    password === nothing ? nothing : String(password),
                    key_path === nothing ? nothing : String(key_path),
-                   proxy_jump === nothing ? nothing : String(proxy_jump), resolved_title,
+                   jump === nothing ? nothing : String(jump), resolved_title,
                    strict_host_key_checking === nothing ? nothing :
                    String(strict_host_key_checking))
     end
