@@ -361,6 +361,11 @@ end
         end
         @test refused_with(() -> SshTarget("hpc"; auth=:key, proxy_jump="[::1],gw"),
                            "'proxy_jump'", "only in the last hop")
+        # ssh runs the hops through $SHELL unquoted: nothing a shell reads is admitted
+        for spec in ("gw;id", "\$(id)@gw", "`id`@gw", "a|b", "gw&", "gw*", "gw?", "~u@gw",
+                     "=gw", "a b@gw", "gw>x", "gw'", "gw\"", "gw\\x", "gw#", "gw{a,b}", "gw!")
+            @test !is_valid_proxy_jump(spec)
+        end
 
         # "none" is the one jump specification a password target accepts. ssh reads it in
         # any letter case; -J NONE would leave a ProxyCommand of ~/.ssh/config in force
